@@ -1,10 +1,8 @@
 // TMDB API client with AbortController support and a public demo key.
 const API_KEY = "8265bd1679663a7ea12ac168da84d2e8";
-const BASE = "https://themoviedb.org";
-
+const BASE = "https://api.themoviedb.org/3";
 export const IMG = (path: string | null, size: "w200" | "w300" | "w500" | "w780" | "original" = "w500") =>
-  path ? `https://tmdb.org{size}${path}` : "";
-
+  path ? `https://image.tmdb.org/t/p/${size}${path}` : "";
 export interface Movie {
   id: number;
   title: string;
@@ -23,7 +21,6 @@ export interface Movie {
   genres?: { id: number; name: string }[];
   tagline?: string;
 }
-
 export interface VideoResult {
   key: string;
   site: string;
@@ -31,7 +28,6 @@ export interface VideoResult {
   name: string;
   official: boolean;
 }
-
 async function fetchJson<T>(
   path: string,
   params: Record<string, string> = {},
@@ -45,7 +41,6 @@ async function fetchJson<T>(
   if (!res.ok) throw new Error(`TMDB ${res.status}`);
   return res.json();
 }
-
 export const tmdb = {
   trending: (s?: AbortSignal) => fetchJson<{ results: Movie[] }>("/trending/movie/week", {}, s),
   popular: (s?: AbortSignal) => fetchJson<{ results: Movie[] }>("/movie/popular", {}, s),
@@ -68,11 +63,10 @@ export const tmdb = {
   search: (q: string, s?: AbortSignal) => fetchJson<{ results: Movie[] }>("/search/multi", { query: q }, s),
   detail: (id: number, s?: AbortSignal) => fetchJson<Movie>(`/movie/${id}`, {}, s),
   videos: (id: number, s?: AbortSignal) => fetchJson<{ results: VideoResult[] }>(`/movie/${id}/videos`, {}, s),
-  similar: (id: number, s?: AbortSignal) => fetchJson<{ results: Movie[] }>("/movie/similar", {}, s),
+  similar: (id: number, s?: AbortSignal) => fetchJson<{ results: Movie[] }>(`/movie/${id}/similar`, {}, s),
   externalIds: (id: number, s?: AbortSignal) =>
     fetchJson<{ imdb_id: string | null }>(`/movie/${id}/external_ids`, {}, s),
 };
-
 export const GENRES: { id: number; name: string }[] = [
   { id: 28, name: "Action" },
   { id: 12, name: "Adventure" },
@@ -91,12 +85,11 @@ export const GENRES: { id: number; name: string }[] = [
   { id: 10752, name: "War" },
   { id: 37, name: "Western" },
 ];
-
 export const STREAM_PROVIDERS = [
-  { name: "EMMER Pro", url: (id: number) => `https://vidsrc.me{id}` },
-  { name: "VidSrc", url: (id: number) => `https://vidsrc.to{id}` },
-  { name: "VidSrc.xyz", url: (id: number) => `https://vidsrc.xyz{id}` },
-  { name: "2Embed", url: (id: number) => `https://2embed.cc{id}` },
-  { name: "MultiEmbed", url: (id: number) => `https://multiembed.mov{id}&tmdb=1` },
-  { name: "AutoEmbed", url: (id: number) => `https://autoembed.cc{id}` },
+  { name: "EMMER Pro", url: (id: number) => `https://vidsrc.me/embed/movie?tmdb=${id}` },
+  { name: "VidSrc", url: (id: number) => `https://vidsrc.to/embed/movie/${id}` },
+  { name: "VidSrc.xyz", url: (id: number) => `https://vidsrc.xyz/embed/movie?tmdb=${id}` },
+  { name: "2Embed", url: (id: number) => `https://www.2embed.cc/embed/${id}` },
+  { name: "MultiEmbed", url: (id: number) => `https://multiembed.mov/?video_id=${id}&tmdb=1` },
+  { name: "AutoEmbed", url: (id: number) => `https://player.autoembed.cc/embed/movie/${id}` },
 ];
