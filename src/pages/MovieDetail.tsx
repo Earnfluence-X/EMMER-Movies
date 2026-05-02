@@ -378,10 +378,25 @@ export default function MovieDetail() {
                 <X size={20} />
               </button>
             </div>
+            
             <p className="text-zinc-400 text-sm mb-4">
-              Paste a direct video URL (.mp4) for "{title}". The file will be saved to your browser's storage so you can watch it
-              fully offline. Pause &amp; resume supported.
+              Paste a direct video URL (.mp4) for "{title}".
             </p>
+            
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => window.open(`https://www.google.com/search?q=intitle:index.of?mp4+${title}+${year}`, '_blank')}
+                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white text-xs py-2 rounded-md transition border border-zinc-600"
+              >
+                🔍 Magic Find Link (Google)
+              </button>
+              <button
+                onClick={() => window.open(`https://dl8.itopit.com/Search?q=${title}`, '_blank')}
+                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white text-xs py-2 rounded-md transition border border-zinc-600"
+              >
+                ⚡ Mirror Search
+              </button>
+            </div>
 
             <div className="bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs rounded-lg p-3 mb-4 flex gap-2">
               <Info size={14} className="shrink-0 mt-0.5" />
