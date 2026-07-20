@@ -16,6 +16,7 @@ import {
   Plus,
   Tv,
   Film,
+  ChevronRight,
 } from "lucide-react";
 import { tmdb, IMG, STREAM_PROVIDERS, type VideoResult, getTitle, getYear } from "../api/tmdb";
 import { searchSubtitles } from "../api/subtitles";
@@ -45,6 +46,11 @@ const DEMO_STREAMS = [
 
 type PlayerMode = "embed" | "custom";
 
+// Check if it's a TV show by looking at the data
+function isTVShow(item: any): boolean {
+  return item?.media_type === "tv" || item?.name !== undefined || item?.number_of_seasons !== undefined;
+}
+
 export default function MovieDetail() {
   const { id } = useParams<{ id: string }>();
   const [params, setParams] = useSearchParams();
@@ -58,34 +64,67 @@ export default function MovieDetail() {
   const [activeUrl, setActiveUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState("");
   const [isAutoDownloading, setIsAutoDownloading] = useState(false);
+  const [selectedSeason, setSelectedSeason] = useState<number>(1);
+  const [selectedEpisode, setSelectedEpisode] = useState<number>(1);
   const prevMovieRef = useRef<number>();
 
-  const { has, add, autoDownload } = useDownloads();
+  const { has, add } = useDownloads();
   const { has: hasInList, add: addToList, remove: removeFromList } = useMyList();
   const { addToHistory, getProgress } = useWatchHistory();
   const progress = getProgress(movieId);
 
-  // Detect if it's a TV show
-  const isTvShow = (data: any) => {
-    return data?.media_type === "tv" || data?.name !== undefined;
-  };
-
-  // Query based on type
-  const { data: movie, isLoading } = useQuery({
+  // ============================================
+  // 1. FIRST, DETECT IF IT'S A TV SHOW BY TRYING BOTH ENDPOINTS
+  // ============================================
+  const { data: movie, isLoading, isError } = useQuery({
     queryKey: ["detail", movieId],
-    queryFn: ({ signal }) => {
-      // Try movie first, if 404 then try TV
-      return tmdb.detail(movieId, signal).catch(() => {
-        return tmdb.tvDetail(movieId, signal);
-      });
+    queryFn: async ({ signal }) => {
+      try {
+        // Try movie endpoint first
+        const movieData = await tmdb.detail(movieId, signal);
+        // If it has a name field instead of title, it's a TV show
+        if (movieData.name && !movieData.title) {
+          // It's actually a TV show, fetch from TV endpoint
+          return await tmdb.tvDetail(movieId, signal);
+        }
+        return movieData;
+      } catch {
+        // If movie fails, try TV
+        try {
+          return await tmdb.tvDetail(movieId, signal);
+        } catch {
+          throw new Error("Not found");
+        }
+      }
     },
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+
+  const isTv = isTVShow(movie);
+
+  // ============================================
+  // 2. FETCH TV SHOW EPISODES
+  // ============================================
+  const { data: episodesData } = useQuery({
+    queryKey: ["episodes", movieId, selectedSeason, isTv],
+    queryFn: ({ signal }) => {
+      if (!isTv || !movieId) return null;
+      return fetch(
+        `https://api.themoviedb.org/3/tv/${movieId}/season/${selectedSeason}?api_key=8265bd1679663a7ea12ac168da84d2e8&language=en-US`,
+        { signal }
+      ).then((res) => res.json());
+    },
+    enabled: isTv && !!movieId,
     staleTime: 5 * 60_000,
   });
 
+  // ============================================
+  // 3. FETCH VIDEOS (Trailers)
+  // ============================================
   const { data: videosData } = useQuery({
-    queryKey: ["videos", movieId, isTvShow(movie) ? "tv" : "movie"],
+    queryKey: ["videos", movieId, isTv ? "tv" : "movie"],
     queryFn: ({ signal }) => {
-      const isTv = isTvShow(movie);
       return isTv
         ? tmdb.tvVideos(movieId, signal)
         : tmdb.videos(movieId, signal);
@@ -94,10 +133,12 @@ export default function MovieDetail() {
     staleTime: 5 * 60_000,
   });
 
+  // ============================================
+  // 4. FETCH SIMILAR
+  // ============================================
   const { data: similarData } = useQuery({
-    queryKey: ["similar", movieId, isTvShow(movie) ? "tv" : "movie"],
+    queryKey: ["similar", movieId, isTv ? "tv" : "movie"],
     queryFn: ({ signal }) => {
-      const isTv = isTvShow(movie);
       return isTv
         ? tmdb.tvSimilar(movieId, signal)
         : tmdb.similar(movieId, signal);
@@ -106,10 +147,12 @@ export default function MovieDetail() {
     staleTime: 5 * 60_000,
   });
 
+  // ============================================
+  // 5. FETCH EXTERNAL IDS (For subtitles)
+  // ============================================
   const { data: extIds } = useQuery({
-    queryKey: ["externalIds", movieId, isTvShow(movie) ? "tv" : "movie"],
+    queryKey: ["externalIds", movieId, isTv ? "tv" : "movie"],
     queryFn: ({ signal }) => {
-      const isTv = isTvShow(movie);
       return isTv
         ? tmdb.tvExternalIds(movieId, signal)
         : tmdb.externalIds(movieId, signal);
@@ -125,7 +168,9 @@ export default function MovieDetail() {
     staleTime: 60 * 60_000,
   });
 
-  // Track watch progress
+  // ============================================
+  // 6. TRACK WATCH HISTORY
+  // ============================================
   useEffect(() => {
     if (movie && movieId !== prevMovieRef.current) {
       addToHistory(movie);
@@ -141,21 +186,25 @@ export default function MovieDetail() {
     if (params.get("play") === "1") setShowPlayer(true);
   }, [params]);
 
+  // ============================================
+  // 7. RENDER
+  // ============================================
   if (isLoading) {
     return <Skeleton variant="detail" />;
   }
 
-  if (!movie) {
+  if (isError || !movie) {
     return (
-      <div className="pt-32 flex justify-center">
+      <div className="pt-32 flex flex-col items-center justify-center text-center">
         <Loader2 className="text-white animate-spin" size={40} />
+        <p className="text-zinc-400 mt-4">Loading...</p>
       </div>
     );
   }
 
   const title = getTitle(movie);
   const year = getYear(movie);
-  const isTv = isTvShow(movie);
+  const isTvShow = isTVShow(movie);
   const isInList = hasInList(movie.id);
   const isDownloaded = has(movie.id);
   const progressPercent = progress ? progress.progress : 0;
@@ -165,6 +214,12 @@ export default function MovieDetail() {
     videos.find((v) => v.site === "YouTube" && v.type === "Trailer" && v.official) ||
     videos.find((v) => v.site === "YouTube" && v.type === "Trailer") ||
     videos.find((v) => v.site === "YouTube");
+
+  // Get episodes
+  const episodes = episodesData?.episodes || [];
+
+  // Get seasons
+  const seasons = movie.seasons || [];
 
   const openPlayer = () => {
     setShowPlayer(true);
@@ -194,6 +249,12 @@ export default function MovieDetail() {
     }
   };
 
+  // Get season/episode display
+  const getSeasonDisplay = (num: number) => {
+    const season = seasons.find((s) => s.season_number === num);
+    return season?.name || `Season ${num}`;
+  };
+
   return (
     <div className="pb-20">
       {/* Backdrop */}
@@ -215,14 +276,13 @@ export default function MovieDetail() {
           <ArrowLeft size={16} /> Back
         </Link>
 
-        {/* TV Show badge on backdrop */}
-        {isTv && (
+        {/* TV Show badge */}
+        {isTvShow && (
           <div className="absolute top-20 right-4 md:right-10 z-10 bg-blue-600 text-white text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5">
             <Tv size={14} /> TV Series
           </div>
         )}
 
-        {/* Progress indicator */}
         {progressPercent > 0 && progressPercent < 100 && (
           <div className="absolute bottom-0 left-0 right-0 h-1 bg-zinc-800 z-10">
             <div
@@ -246,7 +306,7 @@ export default function MovieDetail() {
 
           <div className="flex-1 text-white">
             <div className="flex items-center gap-2 mb-1">
-              {isTv ? (
+              {isTvShow ? (
                 <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded flex items-center gap-1">
                   <Tv size={12} /> TV Show
                 </span>
@@ -272,7 +332,7 @@ export default function MovieDetail() {
                   <Calendar size={14} /> {year}
                 </span>
               )}
-              {isTv ? (
+              {isTvShow ? (
                 <>
                   {movie.number_of_seasons && (
                     <span className="flex items-center gap-1">
@@ -370,8 +430,90 @@ export default function MovieDetail() {
           </div>
         </div>
 
+        {/* ============================================ */}
+        {/* TV SHOW EPISODE SELECTOR */}
+        {/* ============================================ */}
+        {isTvShow && seasons.length > 0 && (
+          <div className="mt-10">
+            <h2 className="text-white text-2xl font-bold mb-4 flex items-center gap-2">
+              <Tv size={24} className="text-blue-500" />
+              Episodes
+            </h2>
+
+            {/* Season selector */}
+            <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
+              {seasons.map((season) => (
+                <button
+                  key={season.season_number}
+                  onClick={() => setSelectedSeason(season.season_number)}
+                  className={`px-4 py-2 rounded-full text-sm font-medium transition whitespace-nowrap ${
+                    selectedSeason === season.season_number
+                      ? "bg-[#e50914] text-white"
+                      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                  }`}
+                >
+                  {season.name || `Season ${season.season_number}`}
+                </button>
+              ))}
+            </div>
+
+            {/* Episodes grid */}
+            {episodes.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {episodes.map((episode: any) => (
+                  <button
+                    key={episode.id}
+                    onClick={() => {
+                      setSelectedEpisode(episode.episode_number);
+                      // Open player with this episode
+                      setShowPlayer(true);
+                      setIframeLoading(true);
+                      setParams({ play: "1" });
+                    }}
+                    className="bg-zinc-900 hover:bg-zinc-800 rounded-lg overflow-hidden border border-zinc-800 hover:border-[#e50914] transition group text-left"
+                  >
+                    {episode.still_path ? (
+                      <img
+                        src={IMG(episode.still_path, "w300")}
+                        alt={episode.name}
+                        className="w-full aspect-video object-cover"
+                      />
+                    ) : (
+                      <div className="w-full aspect-video bg-zinc-800 flex items-center justify-center">
+                        <Tv size={30} className="text-zinc-600" />
+                      </div>
+                    )}
+                    <div className="p-3">
+                      <div className="flex items-center gap-2 text-xs text-zinc-400">
+                        <span>E{episode.episode_number}</span>
+                        {episode.runtime && <span>• {episode.runtime}m</span>}
+                        {episode.vote_average > 0 && (
+                          <span className="flex items-center gap-0.5 text-yellow-400">
+                            <Star size={10} className="fill-yellow-400" /> {episode.vote_average.toFixed(1)}
+                          </span>
+                        )}
+                      </div>
+                      <h3 className="text-white text-sm font-semibold mt-1 group-hover:text-[#e50914] transition">
+                        {episode.name}
+                      </h3>
+                      <p className="text-zinc-500 text-xs line-clamp-2 mt-1">
+                        {episode.overview || "No description available."}
+                      </p>
+                      <div className="mt-2 flex items-center gap-1 text-[10px] text-[#e50914] font-medium">
+                        Watch <ChevronRight size={12} />
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="text-zinc-500 text-sm">No episodes available for this season.</div>
+            )}
+          </div>
+        )}
+
         {/* Trailer */}
-        {trailer && !showPlayer && (
+        {trailer && !showPlayer && !isTvShow && (
           <section className="mt-12">
             <h2 className="text-white text-2xl font-bold mb-4">Official Trailer</h2>
             <div className="relative aspect-video max-w-4xl rounded-lg overflow-hidden bg-black">
@@ -390,7 +532,7 @@ export default function MovieDetail() {
         {(similarData?.results?.length ?? 0) > 0 && (
           <div className="mt-12 -mx-4 md:-mx-10">
             <MovieRow
-              title={isTv ? "More TV Shows Like This" : "More Movies Like This"}
+              title={isTvShow ? "More TV Shows Like This" : "More Movies Like This"}
               movies={similarData!.results}
               showMore
               category="similar"
@@ -399,12 +541,19 @@ export default function MovieDetail() {
         )}
       </div>
 
-      {/* Player Modal - same as before */}
+      {/* Player Modal */}
       {showPlayer && (
         <div className="fixed inset-0 bg-black z-[100] flex flex-col">
           <div className="flex items-center justify-between p-3 md:p-4 bg-black border-b border-zinc-900">
             <div className="flex items-center gap-3 min-w-0">
-              <h3 className="text-white font-bold truncate">{title}</h3>
+              <h3 className="text-white font-bold truncate">
+                {title}
+                {isTvShow && episodesData && selectedEpisode && (
+                  <span className="text-zinc-400 font-normal text-sm ml-2">
+                    S{selectedSeason}E{selectedEpisode}
+                  </span>
+                )}
+              </h3>
               <span className="text-zinc-500 text-xs hidden sm:inline">
                 {mode === "embed" ? `via ${STREAM_PROVIDERS[providerIdx].name}` : "Custom Player"}
               </span>
