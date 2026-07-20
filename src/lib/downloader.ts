@@ -34,6 +34,56 @@ interface StartOpts {
 
 const CHUNK_SIZE = 4 * 1024 * 1024; // 4 MB per range request
 
+// Helper to test if a URL is accessible
+export async function testUrlAccessibility(url: string): Promise<{ ok: boolean; status: number; contentType?: string }> {
+  try {
+    const response = await fetch(url, { 
+      method: 'HEAD',
+      mode: 'cors',
+      cache: 'no-cache',
+    });
+    return {
+      ok: response.ok,
+      status: response.status,
+      contentType: response.headers.get('content-type') || undefined
+    };
+  } catch {
+    return { ok: false, status: 0 };
+  }
+}
+
+// Direct download for personal use (bypasses CORS restrictions)
+export async function directDownload(url: string, filename: string = 'video.mp4'): Promise<boolean> {
+  try {
+    // Fetch the video
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      console.error(`HTTP ${response.status}: ${response.statusText}`);
+      return false;
+    }
+
+    // Get the video as a blob
+    const blob = await response.blob();
+    
+    // Create a download link
+    const downloadUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    
+    // Clean up
+    setTimeout(() => URL.revokeObjectURL(downloadUrl), 5000);
+    return true;
+  } catch (error) {
+    console.error('Direct download failed:', error);
+    return false;
+  }
+}
+
 export function startDownload({ url, onProgress, onComplete, onError }: StartOpts): DownloadHandle {
   const chunks: Uint8Array[] = [];
   let loaded = 0;

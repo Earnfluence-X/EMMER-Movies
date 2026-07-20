@@ -7,12 +7,11 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
   const [status, setStatus] = useState<'idle' | 'searching' | 'found' | 'downloading' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState('');
   const [sources, setSources] = useState<any[]>([]);
-  const [selectedSource, setSelectedSource] = useState<any>(null);
   const { add } = useDownloads();
 
   const handleSearch = async () => {
     setStatus('searching');
-    setMessage('🔍 Searching open directories...');
+    setMessage('🔍 Searching for video sources...');
 
     try {
       const response = await fetch(
@@ -24,10 +23,10 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
       if (data.sources && data.sources.length > 0) {
         setSources(data.sources);
         setStatus('found');
-        setMessage(`✅ Found ${data.sources.length} potential sources. Select one to download.`);
+        setMessage(`✅ Found ${data.sources.length} sources. Click one to download.`);
       } else {
         setStatus('error');
-        setMessage('❌ No sources found. Try a different movie.');
+        setMessage('❌ No sources found.');
       }
     } catch (error: any) {
       setStatus('error');
@@ -36,14 +35,34 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
   };
 
   const handleDownload = async (source: any) => {
-    setSelectedSource(source);
     setStatus('downloading');
-    setMessage(`📥 Downloading from: ${source.source}...`);
+    setMessage(`📥 Downloading: ${source.source}...`);
 
     try {
-      await add(movie, source.url, source.quality || 'Unknown', 'auto');
+      // Direct download using the video URL
+      const response = await fetch(source.url);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      // Get the video as a blob
+      const blob = await response.blob();
+      
+      // Create a download link
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `${movie.title || 'video'}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      
+      // Clean up
+      setTimeout(() => URL.revokeObjectURL(downloadUrl), 5000);
+      
       setStatus('success');
-      setMessage('✅ Download started! Check your Library.');
+      setMessage('✅ Video downloaded! Check your downloads folder.');
     } catch (error: any) {
       setStatus('error');
       setMessage(`❌ Download failed: ${error.message}`);
@@ -71,7 +90,7 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
               className="text-xs bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-1.5 rounded transition flex items-center gap-1"
             >
               <Download size={12} />
-              {source.quality} - {source.source}
+              {source.quality || 'Unknown'} - {source.source}
             </button>
           ))}
         </div>
@@ -93,7 +112,7 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
           className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white font-bold px-6 py-3 rounded-md transition"
         >
           <AlertCircle size={20} />
-          Retry Search
+          Retry
         </button>
         <p className="text-xs text-red-400">{message}</p>
       </div>
