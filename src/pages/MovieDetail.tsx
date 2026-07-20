@@ -1,8 +1,23 @@
 import { useEffect, useState, useRef } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Play, Download, Check, X, Star, Calendar, Clock, ArrowLeft, Loader2, Info, List, Plus } from "lucide-react";
-import { tmdb, IMG, STREAM_PROVIDERS, type VideoResult } from "../api/tmdb";
+import {
+  Play,
+  Download,
+  Check,
+  X,
+  Star,
+  Calendar,
+  Clock,
+  ArrowLeft,
+  Loader2,
+  Info,
+  List,
+  Plus,
+  Tv,
+  Film,
+} from "lucide-react";
+import { tmdb, IMG, STREAM_PROVIDERS, type VideoResult, getTitle, getYear } from "../api/tmdb";
 import { searchSubtitles } from "../api/subtitles";
 import { useDownloads } from "../context/DownloadContext";
 import { useMyList } from "../context/MyListContext";
@@ -45,33 +60,61 @@ export default function MovieDetail() {
   const [isAutoDownloading, setIsAutoDownloading] = useState(false);
   const prevMovieRef = useRef<number>();
 
-  const { has, add, autoDownload, isAutoDownloading: globalAutoDownloading } = useDownloads();
+  const { has, add, autoDownload } = useDownloads();
   const { has: hasInList, add: addToList, remove: removeFromList } = useMyList();
   const { addToHistory, getProgress } = useWatchHistory();
   const progress = getProgress(movieId);
 
-  // Queries
+  // Detect if it's a TV show
+  const isTvShow = (data: any) => {
+    return data?.media_type === "tv" || data?.name !== undefined;
+  };
+
+  // Query based on type
   const { data: movie, isLoading } = useQuery({
-    queryKey: ["movie", movieId],
-    queryFn: ({ signal }) => tmdb.detail(movieId, signal),
+    queryKey: ["detail", movieId],
+    queryFn: ({ signal }) => {
+      // Try movie first, if 404 then try TV
+      return tmdb.detail(movieId, signal).catch(() => {
+        return tmdb.tvDetail(movieId, signal);
+      });
+    },
     staleTime: 5 * 60_000,
   });
 
   const { data: videosData } = useQuery({
-    queryKey: ["videos", movieId],
-    queryFn: ({ signal }) => tmdb.videos(movieId, signal),
+    queryKey: ["videos", movieId, isTvShow(movie) ? "tv" : "movie"],
+    queryFn: ({ signal }) => {
+      const isTv = isTvShow(movie);
+      return isTv
+        ? tmdb.tvVideos(movieId, signal)
+        : tmdb.videos(movieId, signal);
+    },
+    enabled: !!movie,
     staleTime: 5 * 60_000,
   });
 
   const { data: similarData } = useQuery({
-    queryKey: ["similar", movieId],
-    queryFn: ({ signal }) => tmdb.similar(movieId, signal),
+    queryKey: ["similar", movieId, isTvShow(movie) ? "tv" : "movie"],
+    queryFn: ({ signal }) => {
+      const isTv = isTvShow(movie);
+      return isTv
+        ? tmdb.tvSimilar(movieId, signal)
+        : tmdb.similar(movieId, signal);
+    },
+    enabled: !!movie,
     staleTime: 5 * 60_000,
   });
 
   const { data: extIds } = useQuery({
-    queryKey: ["externalIds", movieId],
-    queryFn: ({ signal }) => tmdb.externalIds(movieId, signal),
+    queryKey: ["externalIds", movieId, isTvShow(movie) ? "tv" : "movie"],
+    queryFn: ({ signal }) => {
+      const isTv = isTvShow(movie);
+      return isTv
+        ? tmdb.tvExternalIds(movieId, signal)
+        : tmdb.externalIds(movieId, signal);
+    },
+    enabled: !!movie,
     staleTime: 60 * 60_000,
   });
 
@@ -81,13 +124,6 @@ export default function MovieDetail() {
     enabled: !!extIds?.imdb_id,
     staleTime: 60 * 60_000,
   });
-
-  // Prefetch next movie in similar list
-  const { ref: prefetchRef } = usePrefetch(
-    ["movie", similarData?.results?.[0]?.id],
-    () => tmdb.detail(similarData?.results?.[0]?.id),
-    { threshold: 0.5 }
-  );
 
   // Track watch progress
   useEffect(() => {
@@ -105,22 +141,6 @@ export default function MovieDetail() {
     if (params.get("play") === "1") setShowPlayer(true);
   }, [params]);
 
-  const videos: VideoResult[] = videosData?.results ?? [];
-  const trailer =
-    videos.find((v) => v.site === "YouTube" && v.type === "Trailer" && v.official) ||
-    videos.find((v) => v.site === "YouTube" && v.type === "Trailer") ||
-    videos.find((v) => v.site === "YouTube");
-
-  const handleAutoDownload = async () => {
-    if (!movie || has(movie.id)) return;
-    setIsAutoDownloading(true);
-    try {
-      await autoDownload(movie);
-    } finally {
-      setIsAutoDownloading(false);
-    }
-  };
-
   if (isLoading) {
     return <Skeleton variant="detail" />;
   }
@@ -133,11 +153,18 @@ export default function MovieDetail() {
     );
   }
 
-  const title = movie.title || movie.name || "";
-  const year = (movie.release_date || "").slice(0, 4);
+  const title = getTitle(movie);
+  const year = getYear(movie);
+  const isTv = isTvShow(movie);
   const isInList = hasInList(movie.id);
   const isDownloaded = has(movie.id);
   const progressPercent = progress ? progress.progress : 0;
+
+  const videos: VideoResult[] = videosData?.results ?? [];
+  const trailer =
+    videos.find((v) => v.site === "YouTube" && v.type === "Trailer" && v.official) ||
+    videos.find((v) => v.site === "YouTube" && v.type === "Trailer") ||
+    videos.find((v) => v.site === "YouTube");
 
   const openPlayer = () => {
     setShowPlayer(true);
@@ -172,21 +199,28 @@ export default function MovieDetail() {
       {/* Backdrop */}
       <div className="relative h-[60vh] min-h-[400px] w-full">
         {movie.backdrop_path && (
-          <img 
-            src={IMG(movie.backdrop_path, "original")} 
-            alt={title} 
-            className="absolute inset-0 w-full h-full object-cover" 
+          <img
+            src={IMG(movie.backdrop_path, "original")}
+            alt={title}
+            className="absolute inset-0 w-full h-full object-cover"
           />
         )}
         <div className="absolute inset-0 bg-gradient-to-r from-black via-black/70 to-black/30" />
         <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black to-transparent" />
-        
-        <Link 
-          to="/" 
+
+        <Link
+          to="/"
           className="absolute top-20 left-4 md:left-10 flex items-center gap-2 text-white bg-black/50 hover:bg-black/80 px-3 py-1.5 rounded-md backdrop-blur z-10 text-sm"
         >
           <ArrowLeft size={16} /> Back
         </Link>
+
+        {/* TV Show badge on backdrop */}
+        {isTv && (
+          <div className="absolute top-20 right-4 md:right-10 z-10 bg-blue-600 text-white text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5">
+            <Tv size={14} /> TV Series
+          </div>
+        )}
 
         {/* Progress indicator */}
         {progressPercent > 0 && progressPercent < 100 && (
@@ -203,14 +237,26 @@ export default function MovieDetail() {
       <div className="px-4 md:px-10 -mt-48 relative z-10">
         <div className="flex flex-col md:flex-row gap-6 md:gap-10">
           {movie.poster_path && (
-            <img 
-              src={IMG(movie.poster_path, "w500")} 
-              alt={title} 
-              className="w-44 md:w-64 rounded-lg shadow-2xl shrink-0 self-center md:self-start" 
+            <img
+              src={IMG(movie.poster_path, "w500")}
+              alt={title}
+              className="w-44 md:w-64 rounded-lg shadow-2xl shrink-0 self-center md:self-start"
             />
           )}
-          
+
           <div className="flex-1 text-white">
+            <div className="flex items-center gap-2 mb-1">
+              {isTv ? (
+                <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded flex items-center gap-1">
+                  <Tv size={12} /> TV Show
+                </span>
+              ) : (
+                <span className="bg-[#e50914] text-white text-xs font-bold px-2 py-0.5 rounded flex items-center gap-1">
+                  <Film size={12} /> Movie
+                </span>
+              )}
+            </div>
+
             <h1 className="text-3xl md:text-5xl font-black drop-shadow-2xl">{title}</h1>
             {movie.tagline && <p className="text-zinc-400 italic mt-1">{movie.tagline}</p>}
 
@@ -226,19 +272,37 @@ export default function MovieDetail() {
                   <Calendar size={14} /> {year}
                 </span>
               )}
-              {movie.runtime ? (
-                <span className="flex items-center gap-1">
-                  <Clock size={14} /> {Math.floor(movie.runtime / 60)}h {movie.runtime % 60}m
-                </span>
-              ) : null}
+              {isTv ? (
+                <>
+                  {movie.number_of_seasons && (
+                    <span className="flex items-center gap-1">
+                      📺 {movie.number_of_seasons} seasons
+                    </span>
+                  )}
+                  {movie.number_of_episodes && (
+                    <span className="flex items-center gap-1">
+                      🎬 {movie.number_of_episodes} episodes
+                    </span>
+                  )}
+                  {movie.status && (
+                    <span className="text-xs text-zinc-400">• {movie.status}</span>
+                  )}
+                </>
+              ) : (
+                movie.runtime && (
+                  <span className="flex items-center gap-1">
+                    <Clock size={14} /> {Math.floor(movie.runtime / 60)}h {movie.runtime % 60}m
+                  </span>
+                )
+              )}
               <span className="border border-zinc-500 px-1.5 text-xs">HD</span>
-              
+
               {progressPercent > 0 && (
                 <span className="text-xs text-[#e50914] font-medium">
                   {progressPercent >= 100 ? "✓ Watched" : `${Math.round(progressPercent)}% watched`}
                 </span>
               )}
-              
+
               {isDownloaded && (
                 <span className="text-xs text-green-500 font-medium flex items-center gap-1">
                   <Check size={14} /> Downloaded
@@ -272,8 +336,8 @@ export default function MovieDetail() {
               <button
                 onClick={handleMyListClick}
                 className={`flex items-center gap-2 border font-bold px-7 py-3 rounded-md transition ${
-                  isInList 
-                    ? "bg-zinc-800 border-zinc-600 text-white hover:bg-zinc-700" 
+                  isInList
+                    ? "bg-zinc-800 border-zinc-600 text-white hover:bg-zinc-700"
                     : "bg-zinc-800 border-zinc-600 text-white hover:bg-zinc-700"
                 }`}
               >
@@ -281,10 +345,8 @@ export default function MovieDetail() {
                 {isInList ? "In List" : "Add to List"}
               </button>
 
-              {/* Smart Download Button */}
               <SmartDownloadButton movie={movie} />
 
-              {/* Manual Download Button */}
               <button
                 onClick={() => setShowDownload(true)}
                 disabled={isDownloaded}
@@ -324,15 +386,20 @@ export default function MovieDetail() {
           </section>
         )}
 
-        {/* Similar Movies */}
+        {/* Similar */}
         {(similarData?.results?.length ?? 0) > 0 && (
-          <div ref={prefetchRef} className="mt-12 -mx-4 md:-mx-10">
-            <MovieRow title="More Like This" movies={similarData!.results} showMore category="similar" />
+          <div className="mt-12 -mx-4 md:-mx-10">
+            <MovieRow
+              title={isTv ? "More TV Shows Like This" : "More Movies Like This"}
+              movies={similarData!.results}
+              showMore
+              category="similar"
+            />
           </div>
         )}
       </div>
 
-      {/* Player Modal */}
+      {/* Player Modal - same as before */}
       {showPlayer && (
         <div className="fixed inset-0 bg-black z-[100] flex flex-col">
           <div className="flex items-center justify-between p-3 md:p-4 bg-black border-b border-zinc-900">
@@ -405,7 +472,7 @@ export default function MovieDetail() {
                   <div className="bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm rounded-lg p-3 mb-5 flex gap-2">
                     <Info size={18} className="shrink-0 mt-0.5" />
                     <p>
-                      The Custom Player gives you <b>full controls</b> — fast-forward, playback speed (0.25×–3×), 
+                      The Custom Player gives you <b>full controls</b> — fast-forward, playback speed (0.25×–3×),
                       subtitles, keyboard shortcuts, and fullscreen — but it needs a <b>direct video URL</b>.
                     </p>
                   </div>
@@ -497,11 +564,11 @@ export default function MovieDetail() {
                 <X size={20} />
               </button>
             </div>
-            
+
             <p className="text-zinc-400 text-sm mb-4">
               Paste a direct video URL (.mp4) for "{title}".
             </p>
-            
+
             <div className="flex gap-2 mb-4">
               <button
                 onClick={() => window.open(`https://www.google.com/search?q=intitle:index.of?mp4+${title}+${year}`, '_blank')}

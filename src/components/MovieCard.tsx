@@ -1,15 +1,15 @@
 import { memo, useRef, useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Play, Star, Plus, Check } from "lucide-react";
-import { IMG, type Movie } from "../api/tmdb";
+import { Play, Star, Plus, Check, Tv } from "lucide-react";
+import { IMG, type Movie, getTitle, getYear } from "../api/tmdb";
 import { useMyList } from "../context/MyListContext";
 import { useWatchHistory } from "../context/WatchHistoryContext";
 import { useGesture } from "../hooks/useGesture";
 import { tmdb } from "../api/tmdb";
 
 function MovieCardImpl({ movie, large = false }: { movie: Movie; large?: boolean }) {
-  const title = movie.title || movie.name || "Untitled";
-  const year = (movie.release_date || movie.first_air_date || "").slice(0, 4);
+  const title = getTitle(movie);
+  const year = getYear(movie);
   const poster = IMG(movie.poster_path, "w300");
   const cardRef = useRef<HTMLDivElement>(null);
   const [isHovered, setIsHovered] = useState(false);
@@ -20,6 +20,7 @@ function MovieCardImpl({ movie, large = false }: { movie: Movie; large?: boolean
   const progress = getProgress(movie.id);
   const progressPercent = progress ? progress.progress : 0;
   const isInMyList = has(movie.id);
+  const isTv = movie.media_type === "tv" || movie.name !== undefined;
 
   // Fetch trailer on hover with debounce
   useEffect(() => {
@@ -27,7 +28,9 @@ function MovieCardImpl({ movie, large = false }: { movie: Movie; large?: boolean
     if (isHovered) {
       timeout = setTimeout(async () => {
         try {
-          const videos = await tmdb.videos(movie.id);
+          const videos = isTv
+            ? await tmdb.tvVideos(movie.id)
+            : await tmdb.videos(movie.id);
           const trailer = videos.results.find(
             (v) => v.site === "YouTube" && v.type === "Trailer"
           );
@@ -40,19 +43,17 @@ function MovieCardImpl({ movie, large = false }: { movie: Movie; large?: boolean
       setTrailerKey(null);
     }
     return () => clearTimeout(timeout);
-  }, [isHovered, movie.id]);
+  }, [isHovered, movie.id, isTv]);
 
   // Gesture support
   useGesture(cardRef, {
     onSwipeLeft: () => {
-      // Navigate to detail
       window.location.href = `/movie/${movie.id}`;
     },
     onSwipeRight: () => {
       window.location.href = `/movie/${movie.id}`;
     },
     onDoubleTap: () => {
-      // Add/Remove from My List
       if (isInMyList) {
         remove(movie.id);
       } else {
@@ -83,6 +84,13 @@ function MovieCardImpl({ movie, large = false }: { movie: Movie; large?: boolean
       onMouseLeave={() => setIsHovered(false)}
     >
       <Link to={`/movie/${movie.id}`}>
+        {/* TV Show Badge */}
+        {isTv && (
+          <div className="absolute top-2 left-2 z-10 bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5">
+            <Tv size={10} /> TV
+          </div>
+        )}
+
         {/* Poster Image */}
         {poster ? (
           <img
@@ -95,7 +103,9 @@ function MovieCardImpl({ movie, large = false }: { movie: Movie; large?: boolean
             }`}
           />
         ) : (
-          <div className={`w-full ${large ? "h-64 md:h-72" : "h-48 md:h-56"} flex items-center justify-center text-zinc-500 text-xs p-2 text-center`}>
+          <div
+            className={`w-full ${large ? "h-64 md:h-72" : "h-48 md:h-56"} flex items-center justify-center text-zinc-500 text-xs p-2 text-center`}
+          >
             {title}
           </div>
         )}
@@ -144,7 +154,7 @@ function MovieCardImpl({ movie, large = false }: { movie: Movie; large?: boolean
           {year && <p className="text-zinc-400 text-xs mt-0.5">{year}</p>}
         </div>
 
-        {/* My List Button - shows on hover */}
+        {/* My List Button */}
         <button
           onClick={handleMyListClick}
           className={`absolute top-2 right-2 bg-black/80 backdrop-blur rounded-full p-1.5 transition-all duration-300 ${
