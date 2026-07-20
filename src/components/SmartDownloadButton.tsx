@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Download, Loader2, Check, AlertCircle, Search } from 'lucide-react';
-import { directDownloadToDevice, testUrl } from '../lib/downloader';
+import { Download, Loader2, Check, AlertCircle, Search, Film } from 'lucide-react';
+import { downloadVideo, downloadMagnet } from '../lib/downloader';
 import type { Movie } from '../api/tmdb';
 
 export function SmartDownloadButton({ movie }: { movie: Movie }) {
@@ -10,11 +10,11 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
 
   const handleSearch = async () => {
     setStatus('searching');
-    setMessage('🔍 Searching for video sources...');
+    setMessage('🔍 Searching for movie sources...');
 
     try {
       const response = await fetch(
-        `/api/search?title=${encodeURIComponent(movie.title || '')}&year=${movie.release_date || ''}`
+        `/api/search?title=${encodeURIComponent(movie.title || '')}&year=${movie.release_date || ''}&imdbId=${movie.id}`
       );
       
       const data = await response.json();
@@ -25,7 +25,7 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
         setMessage(`✅ Found ${data.sources.length} sources. Click one to download.`);
       } else {
         setStatus('error');
-        setMessage('❌ No sources found.');
+        setMessage(`❌ No sources found for "${movie.title}". Try a different movie.`);
       }
     } catch (error: any) {
       setStatus('error');
@@ -33,32 +33,34 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
     }
   };
 
-  const handleDownload = async (source: any) => {
+  const handleDownload = (source: any) => {
     setStatus('downloading');
     setMessage(`📥 Downloading from: ${source.source}...`);
 
     try {
-      // Test if the URL is accessible first
-      const test = await testUrl(source.url);
-      
-      if (!test.ok) {
-        setStatus('error');
-        setMessage(`❌ URL not accessible (HTTP ${test.status}). Try another source.`);
+      // Check if it's a magnet link
+      if (source.url.startsWith('magnet:')) {
+        const success = downloadMagnet(source.url);
+        if (success) {
+          setStatus('success');
+          setMessage('✅ Magnet link opened in your torrent client!');
+        } else {
+          setStatus('error');
+          setMessage('❌ Failed to open magnet link.');
+        }
         return;
       }
 
-      // Get the filename
+      // Regular video URL
       const filename = `${movie.title || 'video'}.mp4`;
-      
-      // Direct download to device
-      const success = await directDownloadToDevice(source.url, filename);
+      const success = downloadVideo(source.url, filename);
       
       if (success) {
         setStatus('success');
-        setMessage('✅ Video downloaded! Check your downloads folder.');
+        setMessage(`✅ Download started! Check your downloads folder.`);
       } else {
         setStatus('error');
-        setMessage('❌ Download failed. Try a different source.');
+        setMessage('❌ Download failed. Try another source.');
       }
     } catch (error: any) {
       setStatus('error');
@@ -78,24 +80,25 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
   if (status === 'found') {
     return (
       <div className="flex flex-col gap-2 w-full">
-        <p className="text-xs text-zinc-400">{message}</p>
-        <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+        <p className="text-xs text-zinc-400 mb-2">{message}</p>
+        <div className="flex flex-wrap gap-2 max-h-60 overflow-y-auto p-2 bg-zinc-900/50 rounded-lg">
           {sources.map((source, i) => (
             <button
               key={i}
               onClick={() => handleDownload(source)}
-              className="text-xs bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-1.5 rounded transition flex items-center gap-1"
+              className="text-xs bg-zinc-800 hover:bg-[#e50914] text-white px-3 py-2 rounded transition flex items-center gap-2 w-full sm:w-auto"
             >
-              <Download size={12} />
-              {source.quality || 'Unknown'} - {source.source}
+              <Film size={12} />
+              {source.quality || 'HD'} - {source.source}
+              {source.size && <span className="text-zinc-500">({source.size})</span>}
             </button>
           ))}
         </div>
         <button
           onClick={() => setStatus('idle')}
-          className="text-xs text-zinc-500 hover:text-white transition"
+          className="text-xs text-zinc-500 hover:text-white transition mt-2"
         >
-          ← Back
+          ← Back to search
         </button>
       </div>
     );
@@ -109,7 +112,7 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
           className="flex items-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white font-bold px-6 py-3 rounded-md transition"
         >
           <AlertCircle size={20} />
-          Retry
+          Retry Search
         </button>
         <p className="text-xs text-red-400">{message}</p>
       </div>
@@ -131,7 +134,7 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
         ) : (
           <>
             <Search size={20} />
-            Search & Download
+            Find & Download
           </>
         )}
       </button>

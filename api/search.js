@@ -1,4 +1,4 @@
-// api/search.js
+// api/search.js - Finds movie sources
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -7,161 +7,129 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  const { title, year } = req.query;
+  const { title, year, imdbId } = req.query;
+  const sources = [];
 
   try {
-    const sources = [];
-
     // ============================================
-    // 1. KNOWN WORKING SOURCES (Test these first)
+    // 1. PUBLIC DOMAIN MOVIES
     // ============================================
-    const knownSources = [
-      {
+    const publicDomain = {
+      'night of the living dead': {
+        url: 'https://archive.org/download/night_of_the_living_dead/night_of_the_living_dead.mp4',
+        quality: '1080p',
+        source: 'Public Domain',
+        size: '~800 MB'
+      },
+      'nosferatu': {
+        url: 'https://archive.org/download/nosferatu_1922/nosferatu_1922.mp4',
+        quality: '1080p',
+        source: 'Public Domain',
+        size: '~600 MB'
+      },
+      'big buck bunny': {
         url: 'https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4',
         quality: '1080p',
-        source: 'Blender Foundation',
+        source: 'Blender',
         size: '~150 MB'
       },
-      {
-        url: 'https://download.blender.org/peach/bigbuckbunny_movies/big_buck_bunny_720p_h264.mov',
-        quality: '720p',
-        source: 'Blender Foundation',
-        size: '~200 MB'
-      },
-      {
-        url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+      'sintel': {
+        url: 'https://download.blender.org/peach/bigbuckbunny_movies/Sintel.mp4',
         quality: '1080p',
-        source: 'Google Sample',
-        size: '~150 MB'
-      },
-      {
-        url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-        quality: '1080p',
-        source: 'Google Sample',
-        size: '~150 MB'
+        source: 'Blender',
+        size: '~130 MB'
       }
-    ];
+    };
 
-    // Check if the movie matches any known source
     const lowerTitle = (title || '').toLowerCase();
-    const matchedSources = knownSources.filter(s => {
-      const urlLower = s.url.toLowerCase();
-      return lowerTitle.includes('big buck') || 
-             lowerTitle.includes('bunny') ||
-             lowerTitle.includes('elephant') ||
-             lowerTitle.includes('sintel') ||
-             lowerTitle.includes('tears');
-    });
-
-    if (matchedSources.length > 0) {
-      sources.push(...matchedSources);
+    for (const [key, source] of Object.entries(publicDomain)) {
+      if (lowerTitle.includes(key)) {
+        sources.push(source);
+      }
     }
 
     // ============================================
-    // 2. SEARCH OPEN DIRECTORIES
+    // 2. SEARCH ARCHIVE.ORG
     // ============================================
-    const searchTerms = [
-      `"${title}" "${year}" mp4`,
-      `"${title}" "${year}" 1080p`,
-      `"${title}" "${year}" download`,
-    ];
-
-    for (const term of searchTerms) {
+    if (title) {
       try {
-        // Use DuckDuckGo (less strict than Google)
-        const ddgUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(term)}`;
-        const response = await fetch(ddgUrl, {
-          headers: { 
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          }
-        });
+        const searchUrl = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(title)}&fl[]=identifier&rows=5`;
+        const response = await fetch(searchUrl);
+        const text = await response.text();
         
-        const html = await response.text();
-        
-        // Look for video file URLs
-        const patterns = [
-          /https?:\/\/[^\s"']+\.mp4/gi,
-          /https?:\/\/[^\s"']+\.mkv/gi,
-          /https?:\/\/[^\s"']+\.avi/gi,
-          /https?:\/\/[^\s"']+\.webm/gi,
-        ];
-        
-        for (const pattern of patterns) {
-          const matches = html.match(pattern) || [];
-          for (const match of matches) {
-            if (!sources.some(s => s.url === match)) {
+        const idMatches = text.match(/<str name="identifier">([^<]+)<\/str>/g) || [];
+        for (const idMatch of idMatches) {
+          const id = idMatch.replace(/<[^>]+>/g, '');
+          const formats = ['.mp4', '.mkv', '.webm'];
+          for (const format of formats) {
+            const url = `https://archive.org/download/${id}/${id}${format}`;
+            if (!sources.some(s => s.url === url)) {
               sources.push({
-                url: match,
+                url,
                 quality: 'Unknown',
-                source: 'Open Directory',
+                source: 'Archive.org',
                 size: 'Unknown'
               });
             }
           }
         }
-      } catch (e) {
-        // Skip failed searches
-      }
+      } catch (e) {}
     }
 
     // ============================================
-    // 3. Archive.org Search
+    // 3. SEARCH YTS API
     // ============================================
-    try {
-      const archiveUrl = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(title)}&fl[]=identifier&rows=3`;
-      const response = await fetch(archiveUrl);
-      const text = await response.text();
-      
-      // Simple identifier extraction
-      const ids = text.match(/<str name="identifier">([^<]+)<\/str>/g) || [];
-      for (const idMatch of ids) {
-        const id = idMatch.replace(/<[^>]+>/g, '');
-        const videoUrl = `https://archive.org/download/${id}/${id}.mp4`;
-        if (!sources.some(s => s.url === videoUrl)) {
-          sources.push({
-            url: videoUrl,
-            quality: 'Unknown',
-            source: 'Archive.org',
-            size: 'Unknown'
-          });
+    if (title) {
+      try {
+        const ytsUrl = `https://yts.mx/api/v2/list_movies.json?query_term=${encodeURIComponent(title)}&limit=5`;
+        const response = await fetch(ytsUrl);
+        const data = await response.json();
+        
+        if (data.data && data.data.movies) {
+          for (const movie of data.data.movies) {
+            if (movie.torrents) {
+              for (const torrent of movie.torrents) {
+                sources.push({
+                  url: torrent.url,
+                  quality: torrent.quality,
+                  source: 'YTS',
+                  size: torrent.size
+                });
+              }
+            }
+          }
         }
-      }
-    } catch (e) {}
+      } catch (e) {}
+    }
 
     // ============================================
-    // 4. Remove Duplicates
+    // 4. Add a note if no sources found
     // ============================================
+    if (sources.length === 0) {
+      sources.push({
+        url: null,
+        quality: null,
+        source: 'No sources found',
+        size: null,
+        note: `No sources found for "${title}". Try a different movie.`
+      });
+    }
+
+    // Remove duplicates
     const unique = sources.filter((s, i, self) => 
       i === self.findIndex(t => t.url === s.url)
     );
 
-    // ============================================
-    // 5. If no sources found, provide a fallback
-    // ============================================
-    if (unique.length === 0) {
-      sources.push({
-        url: 'https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4',
-        quality: '1080p',
-        source: 'Fallback (Big Buck Bunny)',
-        size: '~150 MB'
-      });
-    }
-
     res.status(200).json({ 
-      sources: unique,
+      sources: unique.slice(0, 20),
       count: unique.length,
-      message: `Found ${unique.length} potential sources`
+      message: `Found ${unique.length} sources`
     });
 
   } catch (error) {
     res.status(200).json({ 
-      sources: [{
-        url: 'https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4',
-        quality: '1080p',
-        source: 'Fallback',
-        size: '~150 MB'
-      }],
-      message: 'Using fallback source'
+      sources: [],
+      error: error.message
     });
   }
 }
