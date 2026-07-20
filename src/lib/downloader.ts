@@ -1,4 +1,4 @@
-// downloader.ts - Complete working version with WebTorrent
+// downloader.ts - Complete working version
 
 export type DownloadStatus = "queued" | "downloading" | "paused" | "completed" | "error" | "canceled";
 
@@ -17,7 +17,24 @@ export interface DownloadHandle {
 }
 
 // ============================================
-// METHOD 1: Direct Download (Works for .mp4 URLs)
+// OPEN MAGNET LINK IN QBITTORRENT
+// ============================================
+export function openInTorrentClient(magnetLink: string): boolean {
+  try {
+    console.log(`🧲 Opening magnet link in qBittorrent...`);
+    console.log(`🔗 ${magnetLink}`);
+    
+    // This triggers the magnet protocol handler (qBittorrent is registered for magnet links)
+    window.open(magnetLink, '_blank');
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to open magnet:', error);
+    return false;
+  }
+}
+
+// ============================================
+// DIRECT DOWNLOAD (for public domain videos)
 // ============================================
 export function downloadVideo(url: string, filename: string): boolean {
   try {
@@ -45,94 +62,32 @@ export function downloadVideo(url: string, filename: string): boolean {
   }
 }
 
-// ============================================
-// METHOD 2: Magnet Link Download (Opens in torrent client)
-// ============================================
 export function downloadMagnet(magnetLink: string): boolean {
-  try {
-    console.log(`🧲 Opening magnet link...`);
-    window.open(magnetLink, '_blank');
-    return true;
-  } catch (error) {
-    console.error('❌ Failed to open magnet:', error);
-    return false;
-  }
+  return openInTorrentClient(magnetLink);
 }
 
 // ============================================
-// METHOD 3: WebTorrent Streaming (Optional)
-// ============================================
-export async function streamWithWebTorrent(magnetLink: string): Promise<void> {
-  try {
-    // Dynamically import WebTorrent to avoid build issues
-    const WebTorrent = (await import('webtorrent')).default;
-    const client = new WebTorrent();
-    
-    console.log('🧲 Loading torrent...');
-    client.add(magnetLink, (torrent: any) => {
-      console.log(`✅ Torrent loaded: ${torrent.name}`);
-      console.log(`📊 Files: ${torrent.files.length}`);
-      
-      // Find the largest video file
-      const videoFile = torrent.files.reduce((a: any, b: any) => a.length > b.length ? a : b);
-      console.log(`🎬 Playing: ${videoFile.name}`);
-      
-      // Create a stream URL
-      const streamUrl = videoFile.createReadStream();
-      // You can use this with a video element
-      console.log('📺 Ready to stream!');
-    });
-  } catch (error) {
-    console.error('WebTorrent failed:', error);
-  }
-}
-
-// ============================================
-// HELPER: Test if URL is accessible
-// ============================================
-export async function testUrl(url: string): Promise<boolean> {
-  try {
-    const response = await fetch(url, { 
-      method: 'HEAD',
-      mode: 'no-cors',
-    });
-    return true;
-  } catch {
-    return true;
-  }
-}
-
-// ============================================
-// MAIN DOWNLOAD FUNCTION
+// START DOWNLOAD (For compatibility)
 // ============================================
 export function startDownload({ url, onProgress, onComplete, onError }: any): DownloadHandle {
   const status: DownloadStatus = "downloading";
   
-  // Check if it's a magnet link
-  if (url.startsWith('magnet:')) {
-    const success = downloadMagnet(url);
+  if (url && url.startsWith('magnet:')) {
+    const success = openInTorrentClient(url);
     if (success) {
-      setTimeout(() => {
-        onComplete(new Blob());
-      }, 100);
+      setTimeout(() => onComplete(new Blob()), 100);
     } else {
-      setTimeout(() => {
-        onError(new Error('Failed to open magnet link'));
-      }, 100);
+      setTimeout(() => onError(new Error('Failed to open magnet link')), 100);
+    }
+  } else if (url) {
+    const success = downloadVideo(url, 'video.mp4');
+    if (success) {
+      setTimeout(() => onComplete(new Blob()), 100);
+    } else {
+      setTimeout(() => onError(new Error('Download failed')), 100);
     }
   } else {
-    // Regular video URL
-    const filename = 'video.mp4';
-    const success = downloadVideo(url, filename);
-    if (success) {
-      setTimeout(() => {
-        onComplete(new Blob());
-      }, 100);
-    } else {
-      setTimeout(() => {
-        onError(new Error('Download failed'));
-      }, 100);
-    }
+    setTimeout(() => onError(new Error('No URL provided')), 100);
   }
   
   return {
