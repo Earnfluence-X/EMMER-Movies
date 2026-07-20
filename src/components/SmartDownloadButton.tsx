@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Download, Loader2, Check, AlertCircle, Search, Film, CheckCircle2, Tv, Wifi } from 'lucide-react';
+import { Download, Loader2, Check, AlertCircle, Search, Film, CheckCircle2, Wifi } from 'lucide-react';
 import { downloadVideo, downloadMagnet } from '../lib/downloader';
 import type { Movie } from '../api/tmdb';
 
@@ -25,7 +25,7 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
         setMessage(`✅ Found ${data.sources.length} sources. Click one to download.`);
       } else {
         setStatus('error');
-        setMessage(`❌ No sources found for "${movie.title}". Try a different title.`);
+        setMessage(`❌ No sources found. Try a different title.`);
       }
     } catch (error: any) {
       setStatus('error');
@@ -37,13 +37,14 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
     setStatus('downloading');
     
     try {
-      // Check if it's a magnet link
-      if (source.url && source.url.startsWith('magnet:')) {
-        setMessage(`🧲 Opening magnet link in qBittorrent...`);
+      const isMagnet = source.url && source.url.startsWith('magnet:');
+      
+      if (isMagnet) {
+        setMessage(`🧲 Opening magnet link in torrent client...`);
         const success = downloadMagnet(source.url);
         if (success) {
           setStatus('success');
-          setMessage('✅ Magnet link opened in qBittorrent! Download will start there.');
+          setMessage('✅ Magnet link opened! Download will start in qBittorrent.');
         } else {
           setStatus('error');
           setMessage('❌ Failed to open magnet link. Is qBittorrent installed?');
@@ -51,7 +52,7 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
         return;
       }
 
-      // Regular video URL (direct download)
+      // Direct download
       setMessage(`📥 Downloading from ${source.source}...`);
       const filename = `${movie.title || 'video'}.mp4`;
       const success = downloadVideo(source.url, filename);
@@ -85,30 +86,43 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
         <div className="flex flex-wrap gap-2 max-h-60 overflow-y-auto p-2 bg-zinc-900/50 rounded-lg">
           {sources.map((source, i) => {
             const isMagnet = source.url && source.url.startsWith('magnet:');
+            const isDirect = source.url && !source.url.startsWith('magnet:');
+            
             return (
               <button
                 key={i}
                 onClick={() => handleDownload(source)}
-                className={`text-xs hover:text-white px-3 py-2 rounded transition flex items-center gap-2 w-full sm:w-auto ${
+                className={`text-xs px-3 py-2 rounded transition flex items-center gap-2 w-full sm:w-auto ${
                   isMagnet 
                     ? 'bg-blue-800 hover:bg-blue-700 text-white' 
-                    : 'bg-zinc-800 hover:bg-[#e50914] text-white'
+                    : isDirect
+                    ? 'bg-green-800 hover:bg-green-700 text-white'
+                    : 'bg-zinc-800 hover:bg-zinc-700 text-white'
                 }`}
               >
                 {isMagnet ? <Wifi size={12} /> : <Film size={12} />}
                 {source.quality || 'HD'} - {source.source}
                 {source.size && <span className="text-zinc-400">({source.size})</span>}
                 {isMagnet && <span className="text-blue-300 text-[10px]">🧲 Magnet</span>}
+                {isDirect && <span className="text-green-300 text-[10px]">⬇️ Direct</span>}
                 {source.working && <CheckCircle2 size={12} className="text-green-500" />}
               </button>
             );
           })}
         </div>
-        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-2 mt-2">
-          <p className="text-xs text-blue-300 flex items-center gap-2">
-            <Wifi size={14} />
-            Magnet links will open in qBittorrent. Make sure it's installed and running.
-          </p>
+        <div className="flex gap-2 mt-2">
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-2 flex-1">
+            <p className="text-xs text-blue-300 flex items-center gap-2">
+              <Wifi size={12} />
+              🧲 Magnet = Opens in qBittorrent
+            </p>
+          </div>
+          <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-2 flex-1">
+            <p className="text-xs text-green-300 flex items-center gap-2">
+              <Film size={12} />
+              ⬇️ Direct = Downloads immediately
+            </p>
+          </div>
         </div>
         <button
           onClick={() => setStatus('idle')}
@@ -134,7 +148,7 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
         {message.includes('qBittorrent') && (
           <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-2">
             <p className="text-xs text-yellow-300">
-              💡 Make sure qBittorrent is installed and registered for magnet links.
+              💡 Make sure qBittorrent is installed and running.
               <br />
               <a href="https://www.qbittorrent.org/download" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
                 Download qBittorrent
