@@ -24,13 +24,11 @@ export function SmartSearchBar() {
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
-  // Load recent searches
   useEffect(() => {
     const saved = localStorage.getItem("recent-searches");
     if (saved) setRecentSearches(JSON.parse(saved));
   }, []);
 
-  // Load trending suggestions
   useEffect(() => {
     tmdb.trending().then(data => {
       const results = data.results.slice(0, 5).map(m => ({
@@ -45,7 +43,6 @@ export function SmartSearchBar() {
     });
   }, []);
 
-  // Search with debounce
   useEffect(() => {
     if (!debouncedQuery.trim()) {
       setSuggestions([]);
@@ -79,7 +76,6 @@ export function SmartSearchBar() {
   const handleSearch = (searchQuery: string) => {
     if (!searchQuery.trim()) return;
     
-    // Save to recent searches
     const updated = [searchQuery, ...recentSearches.filter(s => s !== searchQuery)].slice(0, 5);
     setRecentSearches(updated);
     localStorage.setItem("recent-searches", JSON.stringify(updated));
@@ -95,7 +91,7 @@ export function SmartSearchBar() {
   };
 
   return (
-    <div className="relative flex-1 max-w-2xl">
+    <div className="relative flex-1 max-w-md">
       <div className="flex items-center bg-black/70 border border-zinc-700 rounded-md focus-within:border-white transition group">
         <Search className="ml-3 text-zinc-400 group-focus-within:text-white" size={18} />
         <input
@@ -104,7 +100,7 @@ export function SmartSearchBar() {
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setIsOpen(true)}
           onBlur={() => setTimeout(() => setIsOpen(false), 200)}
-          placeholder="Search movies, shows, people..."
+          placeholder="Search movies, shows..."
           className="bg-transparent outline-none px-2 py-2 text-white text-sm w-full"
         />
         {query && (
@@ -118,7 +114,7 @@ export function SmartSearchBar() {
       </div>
 
       {isOpen && (
-        <div className="absolute top-full left-0 right-0 mt-2 bg-zinc-900/95 backdrop-blur-sm border border-zinc-800 rounded-lg shadow-2xl overflow-hidden max-h-[450px] overflow-y-auto">
+        <div className="absolute top-full left-0 right-0 mt-2 bg-zinc-900/95 backdrop-blur-sm border border-zinc-800 rounded-lg shadow-2xl overflow-hidden max-h-[400px] overflow-y-auto z-50">
           {query ? (
             <>
               {isLoading ? (
@@ -161,9 +157,6 @@ export function SmartSearchBar() {
                           )}
                         </p>
                       </div>
-                      <div className="text-zinc-600 group-hover:text-white transition">
-                        <Search size={14} />
-                      </div>
                     </button>
                   ))}
                   <button
@@ -182,7 +175,6 @@ export function SmartSearchBar() {
             </>
           ) : (
             <>
-              {/* Recent Searches */}
               {recentSearches.length > 0 && (
                 <>
                   <div className="px-4 py-2 text-zinc-500 text-xs font-medium flex items-center justify-between border-b border-zinc-800">
@@ -212,7 +204,6 @@ export function SmartSearchBar() {
                 </>
               )}
 
-              {/* Trending Suggestions */}
               {trending.length > 0 && (
                 <>
                   <div className="px-4 py-2 text-zinc-500 text-xs font-medium flex items-center gap-2 border-t border-zinc-800">

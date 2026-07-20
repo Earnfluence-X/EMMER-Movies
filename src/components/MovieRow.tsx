@@ -1,4 +1,4 @@
-import { memo, useRef, useEffect } from "react";
+import { memo, useRef, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import MovieCard from "./MovieCard";
@@ -22,6 +22,8 @@ function MovieRowImpl({
   category = ""
 }: MovieRowProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const [showLeft, setShowLeft] = useState(false);
+  const [showRight, setShowRight] = useState(true);
 
   // Prefetch next movies when scrolling
   const { ref: prefetchRef } = usePrefetch(
@@ -39,25 +41,28 @@ function MovieRowImpl({
     });
   };
 
-  // Keyboard navigation for rows
+  const checkScroll = () => {
+    if (!ref.current) return;
+    const { scrollLeft, scrollWidth, clientWidth } = ref.current;
+    setShowLeft(scrollLeft > 10);
+    setShowRight(scrollLeft < scrollWidth - clientWidth - 10);
+  };
+
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowRight" && e.shiftKey) {
-        scroll(1);
-      } else if (e.key === "ArrowLeft" && e.shiftKey) {
-        scroll(-1);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+    const el = ref.current;
+    if (el) {
+      el.addEventListener('scroll', checkScroll);
+      checkScroll();
+      return () => el.removeEventListener('scroll', checkScroll);
+    }
+  }, [movies]);
 
   if (!movies?.length) return null;
 
   return (
-    <section className="my-6 md:my-8 group/row">
+    <section className="my-6 md:my-8 group/row relative">
       <div className="flex items-center justify-between px-4 md:px-10 mb-3">
-        <h2 className="text-white text-lg md:text-2xl font-bold hover:text-[#e50914] transition cursor-pointer">
+        <h2 className="text-white text-lg md:text-2xl font-semibold hover:text-[#e50914] transition cursor-pointer">
           {title}
         </h2>
         {showMore && category && (
@@ -72,19 +77,20 @@ function MovieRowImpl({
       
       <div className="relative">
         {/* Left Scroll Button */}
-        <button
-          onClick={() => scroll(-1)}
-          className="absolute left-0 top-0 bottom-0 z-20 w-10 md:w-14 bg-black/60 hover:bg-black/80 opacity-0 group-hover/row:opacity-100 transition-opacity flex items-center justify-center rounded-r"
-          aria-label="Scroll left"
-        >
-          <ChevronLeft className="text-white" size={28} />
-        </button>
+        {showLeft && (
+          <button
+            onClick={() => scroll(-1)}
+            className="row-scroll-btn row-scroll-btn-left"
+            aria-label="Scroll left"
+          >
+            <ChevronLeft className="text-white" size={28} />
+          </button>
+        )}
 
         {/* Movies Container */}
         <div
           ref={ref}
-          className="flex gap-2 md:gap-3 overflow-x-auto scroll-smooth px-4 md:px-10 pb-4 [&::-webkit-scrollbar]:hidden"
-          style={{ scrollbarWidth: "none" }}
+          className="flex gap-2 md:gap-3 overflow-x-auto scroll-smooth px-4 md:px-10 pb-4 row-scroll"
         >
           {movies.map((m, index) => (
             <div 
@@ -98,19 +104,20 @@ function MovieRowImpl({
         </div>
 
         {/* Right Scroll Button */}
-        <button
-          onClick={() => scroll(1)}
-          className="absolute right-0 top-0 bottom-0 z-20 w-10 md:w-14 bg-black/60 hover:bg-black/80 opacity-0 group-hover/row:opacity-100 transition-opacity flex items-center justify-center rounded-l"
-          aria-label="Scroll right"
-        >
-          <ChevronRight className="text-white" size={28} />
-        </button>
+        {showRight && (
+          <button
+            onClick={() => scroll(1)}
+            className="row-scroll-btn row-scroll-btn-right"
+            aria-label="Scroll right"
+          >
+            <ChevronRight className="text-white" size={28} />
+          </button>
+        )}
       </div>
     </section>
   );
 }
 
-// Memoized with deep comparison for movies
 const MovieRow = memo(MovieRowImpl, (prev, next) => {
   return (
     prev.title === next.title &&

@@ -16,7 +16,6 @@ export default function Home() {
   const { items: myListItems } = useMyList();
   const { history } = useWatchHistory();
 
-  // Get movies from watch history
   const continueWatchingMovies = history
     .filter(item => {
       const progress = item.progress;
@@ -66,7 +65,6 @@ export default function Home() {
   const trendingResults = (trending.data as ListResp | undefined)?.results ?? [];
   const get = (q: typeof queries[number]) => ((q.data as ListResp | undefined)?.results ?? []);
 
-  // Prefetch home page content
   usePrefetch(["prefetch-home"], () => Promise.all([
     tmdb.trending(),
     tmdb.popular(),

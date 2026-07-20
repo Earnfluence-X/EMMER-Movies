@@ -43,25 +43,24 @@ export default function Hero({ movies }: { movies: Movie[] }) {
           key={m.id}
           src={bg}
           alt={title}
-          className="absolute inset-0 w-full h-full object-cover animate-[fadeIn_1s_ease-out]"
+          className="absolute inset-0 w-full h-full object-cover animate-fade-in"
         />
       )}
       
-      {/* Gradient Overlays */}
-      <div className="absolute inset-0 bg-gradient-to-r from-black via-black/60 to-transparent" />
-      <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black to-transparent" />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/20" />
+      {/* Gradients */}
+      <div className="absolute inset-0 hero-gradient" />
+      <div className="absolute inset-x-0 bottom-0 hero-bottom-gradient" />
 
       {/* Content */}
-      <div className="relative h-full flex items-end md:items-center pb-16 md:pb-0">
-        <div className="px-4 md:px-10 max-w-2xl">
-          {/* Badge */}
+      <div className="relative h-full flex items-center px-4 md:px-10 pb-20">
+        <div className="max-w-2xl animate-fade-in-up">
+          {/* Badges */}
           <div className="flex items-center gap-3 mb-4">
             <span className="inline-block bg-[#e50914] text-white text-xs font-bold px-2 py-0.5 rounded">
               NEW
             </span>
             <span className="text-green-500 font-bold text-sm flex items-center gap-1">
-              <span>★</span> {Math.round(m.vote_average * 10)}% Match
+              <ThumbsUp size={14} fill="#22c55e" /> {Math.round(m.vote_average * 10)}% Match
             </span>
             <span className="text-zinc-300 text-sm">{(m.release_date || "").slice(0, 4)}</span>
             <span className="border border-zinc-500 px-1.5 text-xs text-zinc-300">HD</span>
@@ -94,45 +93,44 @@ export default function Hero({ movies }: { movies: Movie[] }) {
             </div>
           )}
 
-          {/* Action Buttons */}
+          {/* Buttons */}
           <div className="flex flex-wrap gap-3 mt-6">
             <Link
               to={`/movie/${m.id}?play=1`}
-              className="flex items-center gap-2 bg-white text-black font-bold px-8 py-3 rounded-md hover:bg-white/90 transition text-lg"
+              className="btn-netflix"
             >
               <Play size={24} className="fill-black" /> Play
             </Link>
             
             <Link
               to={`/movie/${m.id}`}
-              className="flex items-center gap-2 bg-zinc-600/70 backdrop-blur text-white font-bold px-6 py-3 rounded-md hover:bg-zinc-600 transition text-lg"
+              className="btn-netflix-secondary"
             >
               <Info size={22} /> More Info
             </Link>
 
             <button
               onClick={handleMyListClick}
-              className="flex items-center gap-2 bg-black/50 border border-white/40 text-white font-bold px-4 py-3 rounded-md hover:bg-black/80 transition"
+              className="w-12 h-12 rounded-full border-2 border-white/40 flex items-center justify-center hover:border-white transition hover:bg-white/10"
               title={isInList ? "Remove from list" : "Add to list"}
             >
-              {isInList ? <Check size={20} /> : <Plus size={20} />}
-              {isInList ? "In List" : "Add to List"}
+              {isInList ? <Check size={22} className="text-white" /> : <Plus size={22} className="text-white" />}
             </button>
 
             {!isDownloaded && (
               <button
                 onClick={() => add(m, "1080p")}
-                className="flex items-center gap-2 bg-black/50 border border-white/40 text-white font-bold px-4 py-3 rounded-md hover:bg-black/80 transition"
+                className="w-12 h-12 rounded-full border-2 border-white/40 flex items-center justify-center hover:border-white transition hover:bg-white/10"
                 title="Download"
               >
-                <Plus size={20} /> Download
+                <Download size={22} className="text-white" />
               </button>
             )}
           </div>
         </div>
       </div>
 
-      {/* Slider Dots */}
+      {/* Slide Dots */}
       <div className="absolute bottom-24 right-6 hidden md:flex flex-col gap-1.5">
         {movies.slice(0, 5).map((_, i) => (
           <button
@@ -152,14 +150,6 @@ export default function Hero({ movies }: { movies: Movie[] }) {
           TV-MA
         </div>
       </div>
-
-      {/* Mute Toggle (for background video) */}
-      <button
-        onClick={() => setIsMuted(!isMuted)}
-        className="absolute bottom-32 right-10 lg:right-24 text-white/50 hover:text-white/80 transition text-xs"
-      >
-        {isMuted ? "🔇" : "🔊"}
-      </button>
     </div>
   );
 }
