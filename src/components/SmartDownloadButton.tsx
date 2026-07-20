@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import { Download, Loader2, Check, AlertCircle, Search } from 'lucide-react';
-import { useDownloads } from '../context/DownloadContext';
+import { directDownloadToDevice, testUrl } from '../lib/downloader';
 import type { Movie } from '../api/tmdb';
 
 export function SmartDownloadButton({ movie }: { movie: Movie }) {
   const [status, setStatus] = useState<'idle' | 'searching' | 'found' | 'downloading' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState('');
   const [sources, setSources] = useState<any[]>([]);
-  const { add } = useDownloads();
 
   const handleSearch = async () => {
     setStatus('searching');
@@ -36,33 +35,31 @@ export function SmartDownloadButton({ movie }: { movie: Movie }) {
 
   const handleDownload = async (source: any) => {
     setStatus('downloading');
-    setMessage(`📥 Downloading: ${source.source}...`);
+    setMessage(`📥 Downloading from: ${source.source}...`);
 
     try {
-      // Direct download using the video URL
-      const response = await fetch(source.url);
+      // Test if the URL is accessible first
+      const test = await testUrl(source.url);
       
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      if (!test.ok) {
+        setStatus('error');
+        setMessage(`❌ URL not accessible (HTTP ${test.status}). Try another source.`);
+        return;
       }
 
-      // Get the video as a blob
-      const blob = await response.blob();
+      // Get the filename
+      const filename = `${movie.title || 'video'}.mp4`;
       
-      // Create a download link
-      const downloadUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = `${movie.title || 'video'}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      // Direct download to device
+      const success = await directDownloadToDevice(source.url, filename);
       
-      // Clean up
-      setTimeout(() => URL.revokeObjectURL(downloadUrl), 5000);
-      
-      setStatus('success');
-      setMessage('✅ Video downloaded! Check your downloads folder.');
+      if (success) {
+        setStatus('success');
+        setMessage('✅ Video downloaded! Check your downloads folder.');
+      } else {
+        setStatus('error');
+        setMessage('❌ Download failed. Try a different source.');
+      }
     } catch (error: any) {
       setStatus('error');
       setMessage(`❌ Download failed: ${error.message}`);

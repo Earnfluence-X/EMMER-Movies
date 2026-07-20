@@ -1,21 +1,11 @@
-// Streaming downloader with pause / resume / cancel.
-// Strategy: HTTP Range requests. We fetch [start, end] chunks and accumulate them.
-// On pause, we abort the current request but keep accumulated chunks in memory.
-// On resume, we re-issue a Range request starting at the next byte.
-//
-// ⚠️ Limitations imposed by the browser:
-//   - The remote server must allow CORS (Access-Control-Allow-Origin) AND
-//     advertise Accept-Ranges: bytes. Most public test streams do.
-//   - HLS (.m3u8) is NOT supported here — that's a playlist, not a single file.
-//     For HLS you'd need to download each segment; out of scope for now.
-
+// downloader.ts - Complete working version for personal use
 export type DownloadStatus = "queued" | "downloading" | "paused" | "completed" | "error" | "canceled";
 
 export interface DownloadProgress {
   loaded: number;
   total: number;
   status: DownloadStatus;
-  speed: number; // bytes per second
+  speed: number;
 }
 
 export interface DownloadHandle {
@@ -32,41 +22,28 @@ interface StartOpts {
   onError: (err: Error) => void;
 }
 
-const CHUNK_SIZE = 4 * 1024 * 1024; // 4 MB per range request
-
-// Helper to test if a URL is accessible
-export async function testUrlAccessibility(url: string): Promise<{ ok: boolean; status: number; contentType?: string }> {
+// ============================================
+// DIRECT DOWNLOAD - WORKS FOR PERSONAL USE
+// ============================================
+export async function directDownloadToDevice(url: string, filename: string): Promise<boolean> {
   try {
-    const response = await fetch(url, { 
-      method: 'HEAD',
-      mode: 'cors',
-      cache: 'no-cache',
-    });
-    return {
-      ok: response.ok,
-      status: response.status,
-      contentType: response.headers.get('content-type') || undefined
-    };
-  } catch {
-    return { ok: false, status: 0 };
-  }
-}
-
-// Direct download for personal use (bypasses CORS restrictions)
-export async function directDownload(url: string, filename: string = 'video.mp4'): Promise<boolean> {
-  try {
-    // Fetch the video
+    // Show download status
+    console.log(`📥 Downloading: ${filename}`);
+    console.log(`📡 Source: ${url}`);
+    
+    // Fetch the video directly
     const response = await fetch(url);
     
     if (!response.ok) {
-      console.error(`HTTP ${response.status}: ${response.statusText}`);
+      console.error(`❌ HTTP ${response.status}: ${response.statusText}`);
       return false;
     }
 
     // Get the video as a blob
     const blob = await response.blob();
+    console.log(`✅ Downloaded ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
     
-    // Create a download link
+    // Create a download link and trigger download
     const downloadUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = downloadUrl;
@@ -79,10 +56,36 @@ export async function directDownload(url: string, filename: string = 'video.mp4'
     setTimeout(() => URL.revokeObjectURL(downloadUrl), 5000);
     return true;
   } catch (error) {
-    console.error('Direct download failed:', error);
+    console.error('❌ Download failed:', error);
     return false;
   }
 }
+
+// ============================================
+// TEST IF URL IS ACCESSIBLE
+// ============================================
+export async function testUrl(url: string): Promise<{ ok: boolean; status: number; size?: number }> {
+  try {
+    const response = await fetch(url, { 
+      method: 'HEAD',
+      mode: 'cors',
+      cache: 'no-cache',
+    });
+    const size = response.headers.get('content-length');
+    return {
+      ok: response.ok,
+      status: response.status,
+      size: size ? parseInt(size) : undefined
+    };
+  } catch {
+    return { ok: false, status: 0 };
+  }
+}
+
+// ============================================
+// ORIGINAL CHUNK DOWNLOADER (Keep for reference)
+// ============================================
+const CHUNK_SIZE = 4 * 1024 * 1024;
 
 export function startDownload({ url, onProgress, onComplete, onError }: StartOpts): DownloadHandle {
   const chunks: Uint8Array[] = [];
@@ -98,7 +101,6 @@ export function startDownload({ url, onProgress, onComplete, onError }: StartOpt
   const emit = () => onProgress({ loaded, total, status, speed });
 
   async function probe(): Promise<void> {
-    // HEAD request to discover total length and range support.
     try {
       const r = await fetch(url, { method: "HEAD" });
       const len = r.headers.get("content-length");
@@ -106,7 +108,7 @@ export function startDownload({ url, onProgress, onComplete, onError }: StartOpt
       if (len) total = parseInt(len, 10);
       if (ct) mimeType = ct;
     } catch {
-      /* some servers block HEAD; we'll discover total on first GET */
+      // Some servers block HEAD
     }
   }
 
@@ -123,7 +125,7 @@ export function startDownload({ url, onProgress, onComplete, onError }: StartOpt
           signal: controller.signal,
         });
       } catch (err) {
-        if ((err as Error).name === "AbortError") return; // pause/cancel
+        if ((err as Error).name === "AbortError") return;
         status = "error";
         onError(err as Error);
         emit();
@@ -131,7 +133,6 @@ export function startDownload({ url, onProgress, onComplete, onError }: StartOpt
       }
 
       if (res.status === 416) {
-        // Range not satisfiable → we're past the end → done
         status = "completed";
         finalize();
         return;
@@ -143,7 +144,6 @@ export function startDownload({ url, onProgress, onComplete, onError }: StartOpt
         return;
       }
 
-      // Discover total from Content-Range if we didn't have it
       const cr = res.headers.get("content-range");
       if (cr && total === 0) {
         const m = cr.match(/\/(\d+)$/);
@@ -154,7 +154,6 @@ export function startDownload({ url, onProgress, onComplete, onError }: StartOpt
         if (cl) total = parseInt(cl, 10);
       }
 
-      // If server ignored Range and returned the whole file, we just take it all.
       if (res.status === 200 && start === 0) {
         const reader = res.body?.getReader();
         if (!reader) {
@@ -176,7 +175,6 @@ export function startDownload({ url, onProgress, onComplete, onError }: StartOpt
         return;
       }
 
-      // Stream the chunk
       const reader = res.body?.getReader();
       if (!reader) {
         status = "error";
@@ -219,7 +217,7 @@ export function startDownload({ url, onProgress, onComplete, onError }: StartOpt
 
   function finalize() {
     const blob = new Blob(chunks as BlobPart[], { type: mimeType });
-    chunks.length = 0; // free memory
+    chunks.length = 0;
     onComplete(blob);
     emit();
   }
