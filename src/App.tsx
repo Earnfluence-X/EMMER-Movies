@@ -72,6 +72,7 @@ export default function App() {
                             <Routes>
                               <Route path="/" element={<Home />} />
                               <Route path="/browse" element={<Browse />} />
+                              {/* Movie route ONLY - TV route REMOVED */}
                               <Route path="/movie/:id" element={<MovieDetail />} />
                               <Route path="/search" element={<Search />} />
                               <Route path="/downloads" element={<Downloads />} />

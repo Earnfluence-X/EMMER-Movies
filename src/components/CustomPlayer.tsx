@@ -15,7 +15,6 @@ import {
   RotateCcw,
   RotateCw,
   Bookmark,
-  Music,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -41,20 +40,6 @@ function fmtTime(s: number) {
   return h > 0
     ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
     : `${m}:${String(sec).padStart(2, "0")}`;
-}
-
-// Check if URL is CORS-enabled by trying a HEAD request
-async function testCors(url: string): Promise<boolean> {
-  try {
-    const response = await fetch(url, { 
-      method: 'HEAD',
-      mode: 'cors',
-      credentials: 'omit',
-    });
-    return response.ok || response.status === 206;
-  } catch {
-    return false;
-  }
 }
 
 export default function CustomPlayer({ 
@@ -88,74 +73,37 @@ export default function CustomPlayer({
   const [zoomLevel, setZoomLevel] = useState(1);
   const [frameMode, setFrameMode] = useState(false);
   const [frameNumber, setFrameNumber] = useState(0);
-  const [retryCount, setRetryCount] = useState(0);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { showToast } = useToast();
 
-  // Load source with CORS handling
+  // Load source
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !src) return;
-    
     setLoading(true);
     setError(null);
-    setRetryCount(0);
 
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
 
-    const loadVideo = async () => {
-      try {
-        // Test CORS first
-        const corsOk = await testCors(src);
-        if (!corsOk) {
-          setError("Video source blocked by CORS. Try a different source.");
-          setLoading(false);
-          return;
-        }
+    const isHls = /\.m3u8($|\?)/i.test(src);
 
-        const isHls = /\.m3u8($|\?)/i.test(src);
-
-        if (isHls && Hls.isSupported()) {
-          const hls = new Hls({ 
-            enableWorker: true,
-            xhrSetup: (xhr) => {
-              xhr.withCredentials = false;
-            },
-          });
-          hlsRef.current = hls;
-          hls.loadSource(src);
-          hls.attachMedia(video);
-          
-          hls.on(Hls.Events.ERROR, (_e, data) => {
-            if (data.fatal) {
-              setError(`Stream error: ${data.type}. Try a different source.`);
-              setLoading(false);
-            }
-          });
-          
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            setLoading(false);
-          });
-        } else if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
-          // Safari native HLS
-          video.src = src;
-          video.load();
-        } else {
-          // MP4 or other formats
-          video.src = src;
-          video.load();
-        }
-      } catch (err) {
-        setError("Failed to load video. The URL may be invalid or blocked.");
-        setLoading(false);
-      }
-    };
-
-    loadVideo();
+    if (isHls && Hls.isSupported()) {
+      const hls = new Hls({ enableWorker: true });
+      hlsRef.current = hls;
+      hls.loadSource(src);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.ERROR, (_e, data) => {
+        if (data.fatal) setError(`Stream error: ${data.type}`);
+      });
+    } else if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = src;
+    } else {
+      video.src = src;
+    }
 
     return () => {
       if (hlsRef.current) {
@@ -169,7 +117,6 @@ export default function CustomPlayer({
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     const onTime = () => {
@@ -183,46 +130,7 @@ export default function CustomPlayer({
     };
     const onWait = () => setLoading(true);
     const onPlaying = () => setLoading(false);
-    const onCanPlay = () => setLoading(false);
-    const onError = (e: Event) => {
-      const video = e.target as HTMLVideoElement;
-      const errorCode = video.error?.code;
-      let errorMsg = "Couldn't load this video.";
-      
-      switch (errorCode) {
-        case MediaError.MEDIA_ERR_ABORTED:
-          errorMsg = "Playback was aborted.";
-          break;
-        case MediaError.MEDIA_ERR_NETWORK:
-          errorMsg = "Network error. Check your connection.";
-          break;
-        case MediaError.MEDIA_ERR_DECODE:
-          errorMsg = "Video format not supported.";
-          break;
-        case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
-          errorMsg = "Video source not supported.";
-          break;
-        default:
-          errorMsg = "Couldn't load this video. The URL may be invalid or blocked by CORS.";
-      }
-      
-      setError(errorMsg);
-      setLoading(false);
-      
-      // If it's a CORS or network error, try with a proxy
-      if (errorCode === MediaError.MEDIA_ERR_NETWORK || errorCode === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
-        if (retryCount < 2) {
-          setRetryCount(prev => prev + 1);
-          setTimeout(() => {
-            setError(null);
-            setLoading(true);
-            // Try loading again with crossorigin attribute
-            video.crossOrigin = "anonymous";
-            video.load();
-          }, 2000);
-        }
-      }
-    };
+    const onErr = () => setError("Couldn't load this video.");
 
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);
@@ -230,8 +138,7 @@ export default function CustomPlayer({
     v.addEventListener("loadedmetadata", onMeta);
     v.addEventListener("waiting", onWait);
     v.addEventListener("playing", onPlaying);
-    v.addEventListener("canplay", onCanPlay);
-    v.addEventListener("error", onError);
+    v.addEventListener("error", onErr);
 
     return () => {
       v.removeEventListener("play", onPlay);
@@ -240,10 +147,9 @@ export default function CustomPlayer({
       v.removeEventListener("loadedmetadata", onMeta);
       v.removeEventListener("waiting", onWait);
       v.removeEventListener("playing", onPlaying);
-      v.removeEventListener("canplay", onCanPlay);
-      v.removeEventListener("error", onError);
+      v.removeEventListener("error", onErr);
     };
-  }, [retryCount]);
+  }, []);
 
   // Fullscreen state
   useEffect(() => {
@@ -261,13 +167,17 @@ export default function CustomPlayer({
     }, 3000);
   }, []);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts - FIXED
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!wrapRef.current?.contains(document.activeElement) && document.activeElement?.tagName !== "BODY") return;
+      // Don't trigger if typing in input
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+      
       const v = videoRef.current;
       if (!v) return;
       
+      // Frame advance with Shift
       if (e.shiftKey) {
         if (e.key === "ArrowRight") {
           e.preventDefault();
@@ -288,15 +198,19 @@ export default function CustomPlayer({
           v.paused ? v.play() : v.pause();
           break;
         case "arrowright":
+          e.preventDefault();
           v.currentTime = Math.min(v.duration || 0, v.currentTime + 5);
           break;
         case "arrowleft":
+          e.preventDefault();
           v.currentTime = Math.max(0, v.currentTime - 5);
           break;
         case "j":
+          e.preventDefault();
           v.currentTime = Math.max(0, v.currentTime - 10);
           break;
         case "l":
+          e.preventDefault();
           v.currentTime = Math.min(v.duration || 0, v.currentTime + 10);
           break;
         case "arrowup":
@@ -316,42 +230,52 @@ export default function CustomPlayer({
           });
           break;
         case "m":
+          e.preventDefault();
           v.muted = !v.muted;
           setMuted(v.muted);
           break;
         case "f":
+          e.preventDefault();
           toggleFullscreen();
           break;
         case "c":
+          e.preventDefault();
           setShowSettings(showSettings === "subs" ? "none" : "subs");
           break;
         case "b":
+          e.preventDefault();
           addBookmark();
           break;
         case ">":
         case ".":
+          e.preventDefault();
           changeSpeed(Math.min(3, speed + 0.25));
           break;
         case "<":
         case ",":
+          e.preventDefault();
           changeSpeed(Math.max(0.25, speed - 0.25));
+          break;
+        case "?":
+          // Trigger shortcuts dialog
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: '?', ctrlKey: false }));
+          break;
+        case "escape":
+          if (fullscreen) {
+            document.exitFullscreen();
+          }
           break;
       }
       bumpControls();
     };
+    
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [speed, bumpControls, showSettings]);
+  }, [speed, bumpControls, showSettings, fullscreen]);
 
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
-    if (error) {
-      setError(null);
-      setLoading(true);
-      v.load();
-      return;
-    }
     v.paused ? v.play() : v.pause();
   };
 
@@ -442,7 +366,7 @@ export default function CustomPlayer({
     return () => {
       cancelled = true;
     };
-  }, [activeSub, subtitles]);
+  }, [activeSub, subtitles, subBlobUrl]);
 
   return (
     <div
@@ -474,47 +398,25 @@ export default function CustomPlayer({
       {loading && !error && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <Loader2 className="text-white animate-spin" size={56} />
-          <p className="absolute bottom-1/3 text-zinc-500 text-xs">Loading video...</p>
         </div>
       )}
 
-      {/* Error with retry button */}
+      {/* Error */}
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 bg-black/80">
           <p className="text-red-400 font-bold mb-2">⚠ Playback Error</p>
           <p className="text-zinc-300 text-sm max-w-md">{error}</p>
-          <div className="flex gap-3 mt-4">
-            <button
-              onClick={() => {
-                setError(null);
-                setLoading(true);
-                const v = videoRef.current;
-                if (v) {
-                  v.crossOrigin = "anonymous";
-                  v.load();
-                }
-              }}
-              className="bg-[#e50914] hover:bg-[#f40612] text-white font-bold px-4 py-2 rounded-md transition"
-            >
-              Retry
-            </button>
-            <button
-              onClick={() => {
-                setError(null);
-                setLoading(false);
-                // Try using a proxy
-                const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(src)}`;
-                const v = videoRef.current;
-                if (v) {
-                  v.src = proxyUrl;
-                  v.load();
-                }
-              }}
-              className="bg-zinc-800 hover:bg-zinc-700 text-white font-bold px-4 py-2 rounded-md transition"
-            >
-              Try Proxy
-            </button>
-          </div>
+          <button
+            onClick={() => {
+              setError(null);
+              setLoading(true);
+              const v = videoRef.current;
+              if (v) v.load();
+            }}
+            className="mt-4 bg-[#e50914] hover:bg-[#f40612] text-white font-bold px-4 py-2 rounded-md transition text-sm"
+          >
+            Retry
+          </button>
         </div>
       )}
 
@@ -756,7 +658,7 @@ export default function CustomPlayer({
         </div>
 
         <p className="text-[10px] text-zinc-500 mt-2 hidden md:block">
-          Shortcuts: Space/K=play · ←/→=5s · J/L=10s · ↑/↓=volume · M=mute · F=fullscreen · &lt;/&gt;=speed · B=bookmark · Shift+←/→=frame
+          Shortcuts: Space/K=play · ←/→=5s · J/L=10s · ↑/↓=volume · M=mute · F=fullscreen · &lt;/&gt;=speed · B=bookmark · Shift+←/→=frame · C=subtitles
         </p>
       </div>
     </div>

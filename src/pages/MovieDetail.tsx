@@ -14,9 +14,7 @@ import {
   Info,
   List,
   Plus,
-  Tv,
   Film,
-  ChevronRight,
 } from "lucide-react";
 import { tmdb, IMG, STREAM_PROVIDERS, type VideoResult, getTitle, getYear } from "../api/tmdb";
 import { searchSubtitles } from "../api/subtitles";
@@ -46,11 +44,6 @@ const DEMO_STREAMS = [
 
 type PlayerMode = "embed" | "custom";
 
-// Check if it's a TV show by looking at the data
-function isTVShow(item: any): boolean {
-  return item?.media_type === "tv" || item?.name !== undefined || item?.number_of_seasons !== undefined;
-}
-
 export default function MovieDetail() {
   const { id } = useParams<{ id: string }>();
   const [params, setParams] = useSearchParams();
@@ -63,9 +56,6 @@ export default function MovieDetail() {
   const [customUrl, setCustomUrl] = useState("");
   const [activeUrl, setActiveUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState("");
-  const [isAutoDownloading, setIsAutoDownloading] = useState(false);
-  const [selectedSeason, setSelectedSeason] = useState<number>(1);
-  const [selectedEpisode, setSelectedEpisode] = useState<number>(1);
   const prevMovieRef = useRef<number>();
 
   const { has, add } = useDownloads();
@@ -73,89 +63,45 @@ export default function MovieDetail() {
   const { addToHistory, getProgress } = useWatchHistory();
   const progress = getProgress(movieId);
 
-  // ============================================
-  // 1. FIRST, DETECT IF IT'S A TV SHOW BY TRYING BOTH ENDPOINTS
-  // ============================================
-  const { data: movie, isLoading, isError } = useQuery({
-    queryKey: ["detail", movieId],
+  const { data: movie, isLoading, isError, refetch } = useQuery({
+    queryKey: ["movie", movieId],
     queryFn: async ({ signal }) => {
       try {
-        // Try movie endpoint first
-        const movieData = await tmdb.detail(movieId, signal);
-        // If it has a name field instead of title, it's a TV show
-        if (movieData.name && !movieData.title) {
-          // It's actually a TV show, fetch from TV endpoint
-          return await tmdb.tvDetail(movieId, signal);
-        }
-        return movieData;
-      } catch {
-        // If movie fails, try TV
-        try {
-          return await tmdb.tvDetail(movieId, signal);
-        } catch {
-          throw new Error("Not found");
-        }
+        return await tmdb.detail(movieId, signal);
+      } catch (error: any) {
+        console.error("Movie fetch error:", error);
+        throw new Error("Movie not found");
       }
     },
     staleTime: 5 * 60_000,
-    retry: 1,
+    retry: 2,
   });
 
-  const isTv = isTVShow(movie);
-
-  // ============================================
-  // 2. FETCH TV SHOW EPISODES
-  // ============================================
-  const { data: episodesData } = useQuery({
-    queryKey: ["episodes", movieId, selectedSeason, isTv],
-    queryFn: ({ signal }) => {
-      if (!isTv || !movieId) return null;
-      return fetch(
-        `https://api.themoviedb.org/3/tv/${movieId}/season/${selectedSeason}?api_key=8265bd1679663a7ea12ac168da84d2e8&language=en-US`,
-        { signal }
-      ).then((res) => res.json());
-    },
-    enabled: isTv && !!movieId,
-    staleTime: 5 * 60_000,
-  });
-
-  // ============================================
-  // 3. FETCH VIDEOS (Trailers)
-  // ============================================
+  // Fetch Videos (Trailers)
   const { data: videosData } = useQuery({
-    queryKey: ["videos", movieId, isTv ? "tv" : "movie"],
+    queryKey: ["videos", movieId],
     queryFn: ({ signal }) => {
-      return isTv
-        ? tmdb.tvVideos(movieId, signal)
-        : tmdb.videos(movieId, signal);
+      return tmdb.videos(movieId, signal);
     },
     enabled: !!movie,
     staleTime: 5 * 60_000,
   });
 
-  // ============================================
-  // 4. FETCH SIMILAR
-  // ============================================
+  // Fetch Similar
   const { data: similarData } = useQuery({
-    queryKey: ["similar", movieId, isTv ? "tv" : "movie"],
+    queryKey: ["similar", movieId],
     queryFn: ({ signal }) => {
-      return isTv
-        ? tmdb.tvSimilar(movieId, signal)
-        : tmdb.similar(movieId, signal);
+      return tmdb.similar(movieId, signal);
     },
     enabled: !!movie,
     staleTime: 5 * 60_000,
   });
 
-  // ============================================
-  // 5. FETCH EXTERNAL IDS (For subtitles)
-  // ============================================
+  // Fetch External IDs (For subtitles)
   const { data: extIds } = useQuery({
-    queryKey: ["externalIds", movieId, isTv ? "tv" : "movie"],
+    queryKey: ["externalIds", movieId],
     queryFn: ({ signal }) => {
-      return isTv
-        ? tmdb.tvExternalIds(movieId, signal)
-        : tmdb.externalIds(movieId, signal);
+      return tmdb.externalIds(movieId, signal);
     },
     enabled: !!movie,
     staleTime: 60 * 60_000,
@@ -168,9 +114,7 @@ export default function MovieDetail() {
     staleTime: 60 * 60_000,
   });
 
-  // ============================================
-  // 6. TRACK WATCH HISTORY
-  // ============================================
+  // Track watch history
   useEffect(() => {
     if (movie && movieId !== prevMovieRef.current) {
       addToHistory(movie);
@@ -187,8 +131,159 @@ export default function MovieDetail() {
   }, [params]);
 
   // ============================================
-  // 7. RENDER
+  // GLOBAL KEYBOARD SHORTCUTS - Works even in iframe
   // ============================================
+  useEffect(() => {
+    const handleGlobalKeys = (e: KeyboardEvent) => {
+      // Don't trigger if typing in input
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+      
+      // Only work when player is open
+      if (!showPlayer) return;
+      
+      const key = e.key.toLowerCase();
+      
+      // Space - Play/Pause
+      if (key === " " || key === "k") {
+        e.preventDefault();
+        e.stopPropagation();
+        const video = document.querySelector('video');
+        if (video) {
+          video.paused ? video.play() : video.pause();
+        }
+        return;
+      }
+      
+      // Arrow keys - Seek
+      if (key === "arrowright") {
+        e.preventDefault();
+        e.stopPropagation();
+        const video = document.querySelector('video');
+        if (video) {
+          video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
+        }
+        return;
+      }
+      
+      if (key === "arrowleft") {
+        e.preventDefault();
+        e.stopPropagation();
+        const video = document.querySelector('video');
+        if (video) {
+          video.currentTime = Math.max(0, video.currentTime - 5);
+        }
+        return;
+      }
+      
+      // J/L - Skip 10s
+      if (key === "j") {
+        e.preventDefault();
+        e.stopPropagation();
+        const video = document.querySelector('video');
+        if (video) {
+          video.currentTime = Math.max(0, video.currentTime - 10);
+        }
+        return;
+      }
+      
+      if (key === "l") {
+        e.preventDefault();
+        e.stopPropagation();
+        const video = document.querySelector('video');
+        if (video) {
+          video.currentTime = Math.min(video.duration || 0, video.currentTime + 10);
+        }
+        return;
+      }
+      
+      // Arrow Up/Down - Volume
+      if (key === "arrowup") {
+        e.preventDefault();
+        e.stopPropagation();
+        const video = document.querySelector('video');
+        if (video) {
+          const newVol = Math.min(1, (video.volume || 0) + 0.05);
+          video.volume = newVol;
+          video.muted = false;
+        }
+        return;
+      }
+      
+      if (key === "arrowdown") {
+        e.preventDefault();
+        e.stopPropagation();
+        const video = document.querySelector('video');
+        if (video) {
+          const newVol = Math.max(0, (video.volume || 0) - 0.05);
+          video.volume = newVol;
+          video.muted = newVol === 0;
+        }
+        return;
+      }
+      
+      // M - Mute
+      if (key === "m") {
+        e.preventDefault();
+        e.stopPropagation();
+        const video = document.querySelector('video');
+        if (video) {
+          video.muted = !video.muted;
+        }
+        return;
+      }
+      
+      // F - Fullscreen
+      if (key === "f") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(() => {});
+        } else {
+          document.exitFullscreen().catch(() => {});
+        }
+        return;
+      }
+      
+      // C - Toggle subtitles (if available)
+      if (key === "c") {
+        e.preventDefault();
+        e.stopPropagation();
+        const tracks = document.querySelectorAll('track');
+        if (tracks.length > 0) {
+          for (const track of tracks) {
+            track.mode = track.mode === 'showing' ? 'hidden' : 'showing';
+          }
+        }
+        return;
+      }
+      
+      // B - Bookmark (only works in custom player)
+      if (key === "b") {
+        e.preventDefault();
+        e.stopPropagation();
+        // Custom player handles this
+        return;
+      }
+      
+      // ? - Show shortcuts
+      if (key === "?") {
+        e.preventDefault();
+        e.stopPropagation();
+        // Trigger shortcuts dialog
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: '?' }));
+        return;
+      }
+    };
+    
+    // Add event listener with capture phase to catch events before iframe
+    window.addEventListener('keydown', handleGlobalKeys, true);
+    
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeys, true);
+    };
+  }, [showPlayer]);
+
   if (isLoading) {
     return <Skeleton variant="detail" />;
   }
@@ -196,15 +291,23 @@ export default function MovieDetail() {
   if (isError || !movie) {
     return (
       <div className="pt-32 flex flex-col items-center justify-center text-center">
-        <Loader2 className="text-white animate-spin" size={40} />
-        <p className="text-zinc-400 mt-4">Loading...</p>
+        <p className="text-white text-xl font-bold mb-2">Movie not found</p>
+        <p className="text-zinc-400">The movie you're looking for might not exist or was removed.</p>
+        <button 
+          onClick={() => refetch()}
+          className="mt-4 bg-[#e50914] text-white px-6 py-2 rounded-md hover:bg-[#f40612] transition"
+        >
+          Retry
+        </button>
+        <Link to="/" className="mt-2 bg-zinc-800 text-white px-6 py-2 rounded-md hover:bg-zinc-700 transition">
+          Go Home
+        </Link>
       </div>
     );
   }
 
   const title = getTitle(movie);
   const year = getYear(movie);
-  const isTvShow = isTVShow(movie);
   const isInList = hasInList(movie.id);
   const isDownloaded = has(movie.id);
   const progressPercent = progress ? progress.progress : 0;
@@ -214,12 +317,6 @@ export default function MovieDetail() {
     videos.find((v) => v.site === "YouTube" && v.type === "Trailer" && v.official) ||
     videos.find((v) => v.site === "YouTube" && v.type === "Trailer") ||
     videos.find((v) => v.site === "YouTube");
-
-  // Get episodes
-  const episodes = episodesData?.episodes || [];
-
-  // Get seasons
-  const seasons = movie.seasons || [];
 
   const openPlayer = () => {
     setShowPlayer(true);
@@ -249,12 +346,6 @@ export default function MovieDetail() {
     }
   };
 
-  // Get season/episode display
-  const getSeasonDisplay = (num: number) => {
-    const season = seasons.find((s) => s.season_number === num);
-    return season?.name || `Season ${num}`;
-  };
-
   return (
     <div className="pb-20">
       {/* Backdrop */}
@@ -275,13 +366,6 @@ export default function MovieDetail() {
         >
           <ArrowLeft size={16} /> Back
         </Link>
-
-        {/* TV Show badge */}
-        {isTvShow && (
-          <div className="absolute top-20 right-4 md:right-10 z-10 bg-blue-600 text-white text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5">
-            <Tv size={14} /> TV Series
-          </div>
-        )}
 
         {progressPercent > 0 && progressPercent < 100 && (
           <div className="absolute bottom-0 left-0 right-0 h-1 bg-zinc-800 z-10">
@@ -306,15 +390,9 @@ export default function MovieDetail() {
 
           <div className="flex-1 text-white">
             <div className="flex items-center gap-2 mb-1">
-              {isTvShow ? (
-                <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded flex items-center gap-1">
-                  <Tv size={12} /> TV Show
-                </span>
-              ) : (
-                <span className="bg-[#e50914] text-white text-xs font-bold px-2 py-0.5 rounded flex items-center gap-1">
-                  <Film size={12} /> Movie
-                </span>
-              )}
+              <span className="bg-[#e50914] text-white text-xs font-bold px-2 py-0.5 rounded flex items-center gap-1">
+                <Film size={12} /> Movie
+              </span>
             </div>
 
             <h1 className="text-3xl md:text-5xl font-black drop-shadow-2xl">{title}</h1>
@@ -332,28 +410,10 @@ export default function MovieDetail() {
                   <Calendar size={14} /> {year}
                 </span>
               )}
-              {isTvShow ? (
-                <>
-                  {movie.number_of_seasons && (
-                    <span className="flex items-center gap-1">
-                      📺 {movie.number_of_seasons} seasons
-                    </span>
-                  )}
-                  {movie.number_of_episodes && (
-                    <span className="flex items-center gap-1">
-                      🎬 {movie.number_of_episodes} episodes
-                    </span>
-                  )}
-                  {movie.status && (
-                    <span className="text-xs text-zinc-400">• {movie.status}</span>
-                  )}
-                </>
-              ) : (
-                movie.runtime && (
-                  <span className="flex items-center gap-1">
-                    <Clock size={14} /> {Math.floor(movie.runtime / 60)}h {movie.runtime % 60}m
-                  </span>
-                )
+              {movie.runtime && (
+                <span className="flex items-center gap-1">
+                  <Clock size={14} /> {Math.floor(movie.runtime / 60)}h {movie.runtime % 60}m
+                </span>
               )}
               <span className="border border-zinc-500 px-1.5 text-xs">HD</span>
 
@@ -371,7 +431,7 @@ export default function MovieDetail() {
             </div>
 
             {/* Genres */}
-            {movie.genres && (
+            {movie.genres && movie.genres.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-3">
                 {movie.genres.map((g) => (
                   <span key={g.id} className="bg-zinc-800 text-zinc-300 px-2.5 py-1 rounded-full text-xs">
@@ -382,7 +442,9 @@ export default function MovieDetail() {
             )}
 
             {/* Overview */}
-            <p className="text-zinc-200 mt-5 leading-relaxed max-w-3xl">{movie.overview}</p>
+            {movie.overview && (
+              <p className="text-zinc-200 mt-5 leading-relaxed max-w-3xl">{movie.overview}</p>
+            )}
 
             {/* Action Buttons */}
             <div className="flex flex-wrap gap-3 mt-7">
@@ -430,90 +492,8 @@ export default function MovieDetail() {
           </div>
         </div>
 
-        {/* ============================================ */}
-        {/* TV SHOW EPISODE SELECTOR */}
-        {/* ============================================ */}
-        {isTvShow && seasons.length > 0 && (
-          <div className="mt-10">
-            <h2 className="text-white text-2xl font-bold mb-4 flex items-center gap-2">
-              <Tv size={24} className="text-blue-500" />
-              Episodes
-            </h2>
-
-            {/* Season selector */}
-            <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
-              {seasons.map((season) => (
-                <button
-                  key={season.season_number}
-                  onClick={() => setSelectedSeason(season.season_number)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition whitespace-nowrap ${
-                    selectedSeason === season.season_number
-                      ? "bg-[#e50914] text-white"
-                      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-                  }`}
-                >
-                  {season.name || `Season ${season.season_number}`}
-                </button>
-              ))}
-            </div>
-
-            {/* Episodes grid */}
-            {episodes.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                {episodes.map((episode: any) => (
-                  <button
-                    key={episode.id}
-                    onClick={() => {
-                      setSelectedEpisode(episode.episode_number);
-                      // Open player with this episode
-                      setShowPlayer(true);
-                      setIframeLoading(true);
-                      setParams({ play: "1" });
-                    }}
-                    className="bg-zinc-900 hover:bg-zinc-800 rounded-lg overflow-hidden border border-zinc-800 hover:border-[#e50914] transition group text-left"
-                  >
-                    {episode.still_path ? (
-                      <img
-                        src={IMG(episode.still_path, "w300")}
-                        alt={episode.name}
-                        className="w-full aspect-video object-cover"
-                      />
-                    ) : (
-                      <div className="w-full aspect-video bg-zinc-800 flex items-center justify-center">
-                        <Tv size={30} className="text-zinc-600" />
-                      </div>
-                    )}
-                    <div className="p-3">
-                      <div className="flex items-center gap-2 text-xs text-zinc-400">
-                        <span>E{episode.episode_number}</span>
-                        {episode.runtime && <span>• {episode.runtime}m</span>}
-                        {episode.vote_average > 0 && (
-                          <span className="flex items-center gap-0.5 text-yellow-400">
-                            <Star size={10} className="fill-yellow-400" /> {episode.vote_average.toFixed(1)}
-                          </span>
-                        )}
-                      </div>
-                      <h3 className="text-white text-sm font-semibold mt-1 group-hover:text-[#e50914] transition">
-                        {episode.name}
-                      </h3>
-                      <p className="text-zinc-500 text-xs line-clamp-2 mt-1">
-                        {episode.overview || "No description available."}
-                      </p>
-                      <div className="mt-2 flex items-center gap-1 text-[10px] text-[#e50914] font-medium">
-                        Watch <ChevronRight size={12} />
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="text-zinc-500 text-sm">No episodes available for this season.</div>
-            )}
-          </div>
-        )}
-
         {/* Trailer */}
-        {trailer && !showPlayer && !isTvShow && (
+        {trailer && !showPlayer && (
           <section className="mt-12">
             <h2 className="text-white text-2xl font-bold mb-4">Official Trailer</h2>
             <div className="relative aspect-video max-w-4xl rounded-lg overflow-hidden bg-black">
@@ -532,7 +512,7 @@ export default function MovieDetail() {
         {(similarData?.results?.length ?? 0) > 0 && (
           <div className="mt-12 -mx-4 md:-mx-10">
             <MovieRow
-              title={isTvShow ? "More TV Shows Like This" : "More Movies Like This"}
+              title="More Movies Like This"
               movies={similarData!.results}
               showMore
               category="similar"
@@ -546,14 +526,7 @@ export default function MovieDetail() {
         <div className="fixed inset-0 bg-black z-[100] flex flex-col">
           <div className="flex items-center justify-between p-3 md:p-4 bg-black border-b border-zinc-900">
             <div className="flex items-center gap-3 min-w-0">
-              <h3 className="text-white font-bold truncate">
-                {title}
-                {isTvShow && episodesData && selectedEpisode && (
-                  <span className="text-zinc-400 font-normal text-sm ml-2">
-                    S{selectedSeason}E{selectedEpisode}
-                  </span>
-                )}
-              </h3>
+              <h3 className="text-white font-bold truncate">{title}</h3>
               <span className="text-zinc-500 text-xs hidden sm:inline">
                 {mode === "embed" ? `via ${STREAM_PROVIDERS[providerIdx].name}` : "Custom Player"}
               </span>
@@ -575,7 +548,7 @@ export default function MovieDetail() {
                     mode === "custom" ? "bg-[#e50914] text-white" : "text-zinc-400 hover:text-white"
                   }`}
                 >
-                  Custom
+                  Custom (No Ads)
                 </button>
               </div>
               <button onClick={closePlayer} className="text-white bg-zinc-800 hover:bg-zinc-700 rounded-full p-2">
@@ -591,6 +564,9 @@ export default function MovieDetail() {
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-400 z-10">
                     <Loader2 className="animate-spin mb-3" size={40} />
                     <p className="text-sm">Loading stream…</p>
+                    <p className="text-xs text-zinc-500 mt-2">
+                      ⌨️ Keyboard shortcuts: Space/K=play, ←/→=5s, J/L=10s, ↑/↓=volume, M=mute, F=fullscreen
+                    </p>
                   </div>
                 )}
                 <iframe
@@ -618,11 +594,10 @@ export default function MovieDetail() {
             ) : (
               <div className="absolute inset-0 flex flex-col items-center justify-center p-6 overflow-y-auto">
                 <div className="max-w-2xl w-full">
-                  <div className="bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm rounded-lg p-3 mb-5 flex gap-2">
+                  <div className="bg-green-500/10 border border-green-500/30 text-green-200 text-sm rounded-lg p-3 mb-5 flex gap-2">
                     <Info size={18} className="shrink-0 mt-0.5" />
                     <p>
-                      The Custom Player gives you <b>full controls</b> — fast-forward, playback speed (0.25×–3×),
-                      subtitles, keyboard shortcuts, and fullscreen — but it needs a <b>direct video URL</b>.
+                      <b>No ads, no popups!</b> Paste a direct video URL below or try a demo stream.
                     </p>
                   </div>
 
@@ -644,7 +619,7 @@ export default function MovieDetail() {
                     </button>
                   </div>
 
-                  <p className="text-zinc-400 text-sm mb-2">Or try a demo stream:</p>
+                  <p className="text-zinc-400 text-sm mb-2">Or try a demo stream (no ads):</p>
                   <div className="grid gap-2">
                     {DEMO_STREAMS.map((d) => (
                       <button
@@ -695,6 +670,9 @@ export default function MovieDetail() {
               >
                 ← Change source
               </button>
+              <span className="text-green-500 text-xs flex items-center gap-1">
+                ✅ No ads
+              </span>
             </div>
           )}
         </div>

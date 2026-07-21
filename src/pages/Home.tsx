@@ -26,7 +26,7 @@ export default function Home() {
 
   const queries = useQueries({
     queries: [
-      // Movies
+      // Movies only - NO TV SHOWS
       { queryKey: ["trending"], queryFn: ({ signal }: { signal: AbortSignal }) => tmdb.trending(signal) },
       { queryKey: ["popular"], queryFn: ({ signal }: { signal: AbortSignal }) => tmdb.popular(signal) },
       { queryKey: ["topRated"], queryFn: ({ signal }: { signal: AbortSignal }) => tmdb.topRated(signal) },
@@ -37,11 +37,6 @@ export default function Home() {
       { queryKey: ["genre", 27], queryFn: ({ signal }: { signal: AbortSignal }) => tmdb.byGenre(27, signal) },
       { queryKey: ["genre", 878], queryFn: ({ signal }: { signal: AbortSignal }) => tmdb.byGenre(878, signal) },
       { queryKey: ["genre", 16], queryFn: ({ signal }: { signal: AbortSignal }) => tmdb.byGenre(16, signal) },
-      // TV Shows
-      { queryKey: ["trendingTv"], queryFn: ({ signal }: { signal: AbortSignal }) => tmdb.trendingTv(signal) },
-      { queryKey: ["popularTv"], queryFn: ({ signal }: { signal: AbortSignal }) => tmdb.popularTv(signal) },
-      { queryKey: ["topRatedTv"], queryFn: ({ signal }: { signal: AbortSignal }) => tmdb.topRatedTv(signal) },
-      { queryKey: ["airingToday"], queryFn: ({ signal }: { signal: AbortSignal }) => tmdb.airingToday(signal) },
     ],
   });
 
@@ -56,10 +51,6 @@ export default function Home() {
     horror,
     scifi,
     animation,
-    trendingTv,
-    popularTv,
-    topRatedTv,
-    airingToday,
   ] = queries;
 
   const trendingResults = (trending.data as ListResp | undefined)?.results ?? [];
@@ -95,7 +86,7 @@ export default function Home() {
         {/* Continue Watching */}
         {continueWatchingMovies.length > 0 && (
           <MovieRow
-            title="▶️ Continue Watching"
+            title="Continue Watching"
             movies={continueWatchingMovies}
             large
             showMore
@@ -106,7 +97,7 @@ export default function Home() {
         {/* My List */}
         {myListItems.length > 0 && (
           <MovieRow
-            title="⭐ My List"
+            title="My List"
             movies={myListItems.slice(0, 10)}
             large
             showMore
@@ -114,20 +105,14 @@ export default function Home() {
           />
         )}
 
-        {/* Movies */}
-        <MovieRow title="🔥 Trending Movies" movies={trendingResults} large showMore category="trending" />
+        {/* Movies - NO TV SHOWS */}
+        <MovieRow title="Trending Movies" movies={trendingResults} large showMore category="trending" />
         <MovieRow title="Popular Movies" movies={get(popular)} showMore category="popular" />
         <MovieRow title="Now Playing" movies={get(nowPlaying)} showMore category="now-playing" />
         <MovieRow title="Top Rated Movies" movies={get(topRated)} large showMore category="top-rated" />
         <MovieRow title="Coming Soon" movies={get(upcoming)} showMore category="upcoming" />
 
-        {/* TV Shows */}
-        <MovieRow title="📺 Trending TV Shows" movies={get(trendingTv)} large showMore category="trending-tv" />
-        <MovieRow title="📺 Popular TV Shows" movies={get(popularTv)} showMore category="popular-tv" />
-        <MovieRow title="📺 Top Rated TV Shows" movies={get(topRatedTv)} showMore category="top-rated-tv" />
-        <MovieRow title="📺 Airing Today" movies={get(airingToday)} showMore category="airing-today" />
-
-        {/* Genre Movies */}
+        {/* Genre Rows */}
         <MovieRow title="Action & Adventure" movies={get(action)} showMore category="action" />
         <MovieRow title="Sci-Fi Spectacles" movies={get(scifi)} showMore category="sci-fi" />
         <MovieRow title="Comedy Hits" movies={get(comedy)} showMore category="comedy" />
